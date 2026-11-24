@@ -12,5 +12,6 @@
 | [008](008-invitation-links.md) | Secure invitation links | Accepted |
 | [009](009-ddd-hexagonal-and-swappable-persistence.md) | DDD, hexagonal architecture and replaceable persistence | Accepted |
 | [010](010-evidence-based-delivery-and-visual-regression.md) | Evidence-based delivery and visual regression | Accepted |
+| [011](011-monorepo-terraform-and-enforced-architecture.md) | Monorepo, Terraform IaC and enforceable architecture | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.
