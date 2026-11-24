@@ -14,6 +14,7 @@ test:
 	cargo test --manifest-path backend/Cargo.toml --workspace
 
 architecture:
+	python3 -m unittest discover -s tests/architecture -p 'test_*.py'
 	python3 scripts/check_architecture.py
 
 terraform-fmt:
