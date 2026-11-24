@@ -114,3 +114,50 @@ A work item is **verified** only when:
 - A reviewer can reproduce or inspect the evidence.
 
 Passing tests do not prove absence of all defects. The claim is limited to the behaviors and environments covered by the evidence.
+
+
+## 7. Enforcing architecture and monorepo boundaries
+
+The target is a monorepo with enforceable dependency direction, not merely a folder convention.
+
+### Rust workspace boundaries
+
+- domain has no runtime dependencies on application, API frameworks, AWS SDK, database clients or serialization/transport DTOs.
+- application depends on domain and application-owned ports only.
+- adapters implement application ports and may depend on AWS SDK/database libraries.
+- api owns Axum handlers, Lambda entry point, transport mapping and composition root.
+- CI checks the dependency graph and fails on forbidden crate edges. Use crate boundaries as the first enforcement layer; supplement with a dependency policy tool and explicit architecture tests.
+- Add tests that prove domain/application crates compile and run without AWS credentials or external services.
+
+### Frontend boundaries
+
+- Keep feature/domain UI libraries separated from infrastructure/API access and app bootstrap.
+- Enforce import boundaries with ESLint rules (or workspace tags if a monorepo tool is later justified).
+- Do not allow components to call AWS services or access persistence directly; use typed application-facing client services.
+- Visual regression tests are a required check for covered critical screens; unexpected screenshot diffs fail CI.
+
+### Merge protection
+
+Configure GitHub branch protection or a repository ruleset for the default branch:
+- Require pull requests; disallow direct pushes and force pushes.
+- Require all named CI status checks, including architecture, tests, visual regression (where relevant), OpenAPI and Terraform validation.
+- Require branch to be up to date or use merge queue if parallel work makes this practical.
+- Require review of Terraform plans and protected-environment approval for production apply.
+- Do not allow administrators to bypass checks as normal workflow.
+- Keep check names stable; changes to workflows must update branch-protection configuration in the same reviewed change.
+
+A check is a gate only when it is configured as a required status check in GitHub. A workflow existing in the repository is not by itself enforcement.
+
+## 8. Terraform/IaC verification evidence
+
+For Terraform changes, preserve:
+- terraform fmt -check output.
+- terraform init -backend=false and terraform validate output for static validation.
+- Static security scan report (for example Checkov or Trivy config) with findings reviewed.
+- PR plan summary and full plan artifact handled as sensitive data.
+- Explicit review of creates, updates, deletes, IAM changes, public exposure, data retention and cost impact.
+- Apply run reference for changes actually deployed.
+- Post-apply smoke tests and resource/configuration checks.
+- Rollback/recovery steps, especially for stateful resources and data stores.
+
+Terraform plans are evidence of intended changes, not evidence that deployment succeeded. An apply is not evidence that the application works; smoke tests are still required.
