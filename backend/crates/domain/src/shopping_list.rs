@@ -74,8 +74,8 @@ impl ShoppingList {
 
 #[cfg(test)]
 mod tests {
-    use crate::identifiers::{ListId, UserId};
     use super::{ListName, ListNameError, ShoppingList};
+    use crate::identifiers::{ListId, UserId};
 
     #[test]
     fn list_name_is_trimmed() {
