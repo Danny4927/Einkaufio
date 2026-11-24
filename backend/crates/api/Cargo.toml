@@ -1,0 +1,9 @@
+[package]
+name = "einkaufio-api"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+einkaufio-adapters = { path = "../adapters" }
+einkaufio-application = { path = "../application" }
