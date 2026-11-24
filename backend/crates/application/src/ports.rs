@@ -1,22 +1,21 @@
 //! Outbound ports owned by the application layer.
 
-use einkaufio_domain::ShoppingList;
+use einkaufio_domain::{ItemId, ShoppingItem, ShoppingList};
 
-/// Persistence failures exposed by the repository port, without storage-specific details.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RepositoryError {
-    AlreadyExists,
-    Unavailable,
-}
+pub enum RepositoryError { AlreadyExists, NotFound, Conflict, Unavailable }
 
-/// Persists a newly created personal shopping list.
-///
-/// Implementations must atomically persist the list and the owner's list reference.
+/// Atomically persists a new personal list and the owner's list reference.
 pub trait ShoppingListRepository {
     fn create_personal(&self, list: ShoppingList) -> Result<(), RepositoryError>;
 }
 
-/// Generates opaque list identifiers. The application validates the generated value.
-pub trait ListIdGenerator {
-    fn generate(&self) -> String;
+/// Item mutations and parent-list version changes must be atomic in every adapter.
+pub trait ShoppingItemRepository {
+    fn add_item(&self, list_id: &str, expected_list_version: u64, item: ShoppingItem) -> Result<u64, RepositoryError>;
+    fn set_item_checked(&self, list_id: &str, item_id: &ItemId, expected_item_version: u64, checked: bool) -> Result<(ShoppingItem, u64), RepositoryError>;
+    fn delete_item(&self, list_id: &str, item_id: &ItemId, expected_item_version: u64) -> Result<u64, RepositoryError>;
 }
+
+pub trait ListIdGenerator { fn generate(&self) -> String; }
+pub trait ItemIdGenerator { fn generate(&self) -> String; }
