@@ -269,3 +269,82 @@ See [ADRs](decisions/README.md): serverless modular monolith, Cognito, DynamoDB 
 - Port: interface owned by the application/domain boundary.
 - Adapter: technology-specific implementation of a port.
 - Aggregate: DDD consistency boundary for domain invariants.
+
+
+## 12. Repository and infrastructure architecture
+
+### Monorepo
+
+All first-party components live in one repository so API, clients, infrastructure and documentation can evolve in one reviewable change.
+
+Target top-level layout:
+
+```text
+apps/web/                         Angular PWA
+backend/Cargo.toml                Rust workspace
+backend/crates/domain/            Domain model and invariants
+backend/crates/application/        Use cases and ports
+backend/crates/adapters/           DynamoDB and external adapters
+backend/crates/api/                Axum/Lambda inbound adapter + composition root
+infra/terraform/bootstrap/         Terraform remote-state bootstrap
+infra/terraform/modules/           Reusable infrastructure modules
+infra/terraform/environments/dev/  Development environment root
+infra/terraform/environments/prod/ Production environment root
+contracts/openapi/                 Versioned API contract
+tests/e2e/                          Playwright E2E
+tests/visual/                       Visual regression specs and baselines
+tests/architecture/                 Architecture rule tests
+.github/workflows/                  CI and deployment workflows
+docs/                               Architecture, ADRs and quality policy
+```
+
+The Rust workspace is intentionally split by dependency boundary, not by technical layer scattered across feature folders. Domain and application crates must compile and test without AWS credentials, network access or a running database. Outbound adapters depend inward on ports; the composition root is the only place that wires concrete implementations.
+
+### Infrastructure as Code
+
+Terraform is the sole source of truth for AWS resource configuration.
+
+- Keep Terraform configuration, modules, environment roots and variable examples in this monorepo.
+- Use separate state and isolated environment roots for dev and prod. Do not share mutable state between environments.
+- Bootstrap the remote-state S3 bucket in a separate Terraform root. Initial bootstrap may use local state; migrate state to the remote backend after the bucket and its protections are verified.
+- Protect the state bucket with versioning, encryption, public-access blocking and least-privilege access. Use Terraform S3 native state locking (use_lockfile) with a supported Terraform version; do not add a DynamoDB lock table solely for legacy locking.
+- Pin Terraform/provider versions and commit dependency lock files.
+- Use modules for coherent reusable components, not one module per trivial resource. Keep environment-specific values outside reusable modules.
+- Terraform plans are generated in CI for every infrastructure change and attached to the PR. Apply is a separate protected workflow, with environment approval for production.
+- GitHub Actions authenticates to AWS through OIDC and narrowly scoped IAM roles. No long-lived AWS keys or credentials in repository secrets.
+- CI must detect formatting, validation, provider lock drift, security misconfiguration and unexpected destructive plans. Destructive production changes require explicit review and approval.
+- Do not make out-of-band console changes. If emergency changes are unavoidable, reconcile them back into Terraform immediately and record the incident.
+- State files, plan files containing sensitive values, tfvars with secrets and credentials must never be committed or uploaded as public artifacts.
+
+### CI enforcement model
+
+A monorepo CI run is the merge gate. At minimum, required checks cover:
+- Rust formatting, Clippy, unit/integration tests, and architecture dependency rules.
+- Adapter contract tests and database integration tests in a controlled test environment.
+- Angular lint, unit/component tests, Playwright E2E and visual regression.
+- OpenAPI lint and compatibility checks.
+- Terraform fmt, init/validate, static security checks and PR plan.
+- Secret scanning and dependency vulnerability/license policy.
+- Build artifacts and test/visual/plan evidence retention.
+
+Use path filters only to skip expensive jobs when their inputs demonstrably cannot be affected. A small always-run workflow must validate the change graph and required status checks; changes to shared contracts, root configuration, workflows, tool versions or build scripts trigger all affected suites. Branch protection/rulesets must require the named checks and prohibit direct pushes to the protected branch.
+
+### Deployment workflow
+
+1. Pull request: run relevant tests and static checks; produce Terraform plan for changed environments.
+2. Review: inspect code, test reports, visual diffs and plan; approve baseline changes intentionally.
+3. Merge: required checks must be green.
+4. Deploy dev: assume AWS role through OIDC, apply reviewed Terraform changes, publish backend and frontend artifacts, run smoke tests.
+5. Promote prod: require protected-environment approval; use a fresh plan and explicit apply; run production smoke tests.
+6. Record deployed commit, Terraform run/plan reference, artifact versions and smoke-test result.
+
+Infrastructure deployment and application deployment remain separable so a frontend-only change does not unnecessarily modify AWS resources.
+
+### Technical enforcement of architecture
+
+- Rust crate dependency graph is the primary hard boundary. Domain cannot depend on application, adapters, Axum, Lambda or AWS SDK. Application can depend on domain and its own port abstractions, but not infrastructure adapters.
+- Add compile-time dependency checks and automated architecture tests; fail CI on a forbidden edge.
+- Keep persistence interfaces application-owned and behavior-oriented. Contract tests run against each adapter implementation.
+- Frontend imports are constrained by Angular library boundaries (for example ESLint boundary rules or Nx tags if Nx is adopted); do not add Nx solely for fashion.
+- API DTOs are generated/validated from the OpenAPI contract; domain entities are never serialized directly as transport contracts.
+- Keep CI workflows themselves version-controlled and reviewed like application code.
