@@ -30,6 +30,8 @@ jobs:
         run: cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --manifest-path backend/Cargo.toml --workspace
+      - name: Architecture checker unit tests
+        run: python3 -m unittest discover -s tests/architecture -p 'test_*.py'
       - name: Architecture boundaries
         run: python3 scripts/check_architecture.py
 
