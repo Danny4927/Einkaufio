@@ -12,6 +12,7 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - [OpenAPI 3.1 contract](docs/api/openapi.yaml)
 - [Implementation roadmap](docs/roadmap.md)
 - [Security model](docs/security.md)
+- [Quality engineering and implementation evidence](docs/quality-engineering.md)
 
 ## Architecture at a glance
 
@@ -20,19 +21,23 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - Backend: Rust + Axum, AWS Lambda custom runtime, ARM64.
 - API: HTTPS Lambda Function URL initially.
 - Identity: Amazon Cognito User Pool; accounts required.
-- Persistence: one DynamoDB table, single-table design, no GSI initially.
+- Domain: Domain-Driven Design (DDD) with bounded contexts and a hexagonal (ports-and-adapters) architecture.
+- Persistence: DynamoDB adapter initially; domain/application layers must not depend on DynamoDB so another database can replace it.
 - Synchronization: version-based polling, nominally every 15 seconds while a list is visible.
 - Infrastructure: Terraform; GitHub Actions with AWS OIDC.
+- Frontend quality: automated component/E2E tests plus visual regression tests.
 
 ## Guiding principles
 
 1. Minimize idle cost and operational complexity.
-2. Keep business rules on the backend.
-3. Keep API contracts client-independent.
-4. Authorize every resource access server-side.
-5. Use optimistic concurrency to prevent silent overwrites.
-6. Add real-time infrastructure only when measured product needs justify it.
+2. Use DDD and hexagonal architecture; keep domain rules independent of frameworks and storage.
+3. Keep business rules on the backend.
+4. Keep API contracts client-independent.
+5. Authorize every resource access server-side.
+6. Use optimistic concurrency to prevent silent overwrites.
+7. Verify every implementation step with objective evidence.
+8. Add real-time infrastructure only when measured product needs justify it.
 
 ## Status
 
-This repository begins with product and architecture documentation. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
+This repository contains the initial product and architecture baseline. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
