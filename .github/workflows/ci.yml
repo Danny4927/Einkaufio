@@ -43,3 +43,9 @@ jobs:
           terraform_version: 1.10.5
       - name: Terraform formatting
         run: terraform fmt -check -recursive infra/terraform
+      - name: Terraform validate
+        run: |
+          for dir in infra/terraform/bootstrap infra/terraform/environments/dev infra/terraform/environments/prod; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
