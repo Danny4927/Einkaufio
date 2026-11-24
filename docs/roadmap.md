@@ -141,3 +141,53 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Terraform plan is reviewed and cost-affecting resources understood.
 - Deployment, smoke test and rollback are documented.
 - AWS pricing, free-tier eligibility and quotas are verified for target account.
+
+
+## Monorepo and enforcement implementation sequence
+
+The following foundation work is a prerequisite to feature implementation. Keep it in the same repository and deliver it through small reviewable PRs.
+
+### M0a – Monorepo skeleton and developer experience
+- [ ] Create the agreed top-level layout: apps/web, backend, infra/terraform, contracts/openapi, tests, docs, .github/workflows.
+- [ ] Move the existing OpenAPI contract into contracts/openapi and update references (or keep a compatibility pointer during transition).
+- [ ] Establish Rust workspace crates for domain, application, adapters and API/composition root.
+- [ ] Add Angular app under apps/web; pin Node/package manager and commit lockfiles.
+- [ ] Add root-level developer commands/documentation that invoke each toolchain reproducibly.
+- [ ] Add path-aware CI orchestration with safe dependency triggers.
+- Evidence: clean checkout setup on CI, workspace builds, Angular build, lockfile consistency and documented tree.
+
+### M0b – Architecture enforcement
+- [ ] Add Rust dependency rules that reject forbidden crate edges.
+- [ ] Add automated tests for domain/application independence from AWS and HTTP frameworks.
+- [ ] Add adapter contract-test harness, initially implemented for DynamoDB.
+- [ ] Add Angular import-boundary lint rules.
+- [ ] Add OpenAPI lint and breaking-change detection.
+- [ ] Configure GitHub branch protection/ruleset so required checks actually block merge.
+- Evidence: CI passes on compliant architecture; a temporary forbidden dependency/import is shown to fail the relevant check (negative test), then removed.
+
+### M0c – CI quality gates
+- [ ] Rust fmt, Clippy, unit/integration tests.
+- [ ] Angular lint, unit/component tests, Playwright E2E and visual regression.
+- [ ] Security/dependency/secret scans.
+- [ ] Terraform fmt, validate and static security scan.
+- [ ] Publish test reports, visual diffs and Terraform plan summary as PR artifacts.
+- Evidence: green required checks on a PR and inspected failure artifacts from a controlled failing test.
+
+### M1 – Terraform AWS foundation
+- [ ] Create a dedicated Terraform bootstrap root for remote state.
+- [ ] Provision protected S3 state bucket (versioning, encryption, public access blocked, least-privilege IAM) and enable S3 native state locking.
+- [ ] Migrate bootstrap state to remote backend and verify state recovery/versioning.
+- [ ] Create separate dev and prod Terraform roots/state keys.
+- [ ] Add reusable modules for Cognito, DynamoDB, Lambda/Function URL, frontend S3/CloudFront/OAC, IAM, logs/alarms and budgets.
+- [ ] Add GitHub OIDC roles with least privilege; separate plan and apply permissions where practical.
+- [ ] Add PR plan workflow and protected production apply workflow.
+- [ ] Pin Terraform and provider versions; commit provider lock file.
+- Evidence: fmt/validate/security scans, reviewed plan, successful dev apply, post-apply smoke tests, state recovery test and resource/cost inventory.
+
+### M1.1 – Application deployment pipeline
+- [ ] Build Rust Lambda artifact and Angular assets from the monorepo.
+- [ ] Deploy artifacts without manual console steps.
+- [ ] Record commit SHA and artifact versions.
+- [ ] Run deployed API and frontend smoke tests.
+- [ ] Gate production promotion with environment approval and a fresh Terraform plan.
+- Evidence: deployment run linked to commit, successful smoke tests and documented rollback.
