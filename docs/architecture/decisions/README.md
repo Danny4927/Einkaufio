@@ -10,5 +10,7 @@
 | [006](006-platform-neutral-api-android.md) | Platform-neutral API and future Android | Accepted |
 | [007](007-angular-web-hosting.md) | Angular on S3 and CloudFront | Accepted |
 | [008](008-invitation-links.md) | Secure invitation links | Accepted |
+| [009](009-ddd-hexagonal-and-swappable-persistence.md) | DDD, hexagonal architecture and replaceable persistence | Accepted |
+| [010](010-evidence-based-delivery-and-visual-regression.md) | Evidence-based delivery and visual regression | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.
