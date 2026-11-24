@@ -26,7 +26,7 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - Persistence: DynamoDB adapter initially; domain/application layers must not depend on DynamoDB so another database can replace it.
 - Synchronization: version-based polling, nominally every 15 seconds while a list is visible.
 - Infrastructure: Terraform, including AWS resources; GitHub Actions with AWS OIDC.
-- Frontend quality: automated component/E2E tests plus visual regression tests.
+- Frontend quality: Angular build, Playwright E2E and screenshot smoke capture are in CI; pixel-baseline regression is still pending.
 - Delivery: architecture rules, tests, security checks and Terraform validation are intended to become required CI checks; branch protection must be configured separately.
 
 ## Guiding principles
@@ -74,13 +74,16 @@ The exact crate split may evolve with bounded contexts, but dependency direction
 
 ## Developer commands
 
-- `make architecture`: run architecture checker unit tests and inspect the actual Rust workspace dependency graph.
-- `make fmt`, `make lint`, `make test`: run Rust formatting, Clippy and workspace tests.
-- `make terraform-fmt`: check Terraform formatting.
-- `make check`: run the checks currently implemented in this repository.
+- make architecture: run architecture checker unit tests and inspect the actual Rust workspace dependency graph.
+- make fmt, make lint, make test: run Rust formatting, Clippy and workspace tests.
+- make terraform-fmt: check Terraform formatting.
+- make check: run the checks currently implemented in this repository.
+- In apps/web: npm install, npm run build, npm run e2e.
 
-The commands require Rust stable with rustfmt/Clippy, Python 3.12+ and Terraform 1.10.5+.
+The web toolchain is Angular 22.3.0, TypeScript 6.0.3, Node.js 24.15.0 and Playwright 1.65.1. Direct dependency versions and npm are pinned; the committed npm lockfile is verified in CI with npm ci.
+
+The commands require Rust stable with rustfmt/Clippy, Python 3.12+, Terraform 1.10.5+, and Node/npm for the web client.
 
 ## Status
 
-The repository foundation currently includes the Rust workspace skeleton, initial architecture-boundary checks, Terraform root placeholders and a first CI workflow. The Angular workspace, production Terraform resources, deployment workflows, GitHub branch protection and AWS deployment are not implemented yet. The structure above is a target architecture, not a claim that all components are already operational. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
+The repository foundation includes the Rust workspace skeleton, architecture-boundary checks, Terraform root placeholders and CI. The Angular workspace, initial landing page, Playwright E2E tests and screenshot smoke capture are implemented in the current frontend work. A reviewed pixel screenshot baseline is still outstanding. Production Terraform resources, deployment workflows, GitHub branch protection and AWS deployment are not implemented yet. The structure above is a target architecture, not a claim that all components are already operational. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.

@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'feat/**']
 
 permissions:
   contents: read
@@ -34,6 +34,40 @@ jobs:
         run: python3 -m unittest discover -s tests/architecture -p 'test_*.py'
       - name: Architecture boundaries
         run: python3 scripts/check_architecture.py
+
+  web:
+    name: web / build-e2e-visual-capture
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: apps/web/.nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Pin npm
+        run: npm install --global npm@10.9.2
+      - name: Install dependencies from committed lockfile
+        run: npm ci --no-audit --no-fund
+      - name: Production build
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end and screenshot smoke tests
+        run: npm run e2e
+      - name: Upload Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
 
   terraform:
     name: infrastructure / terraform-format
