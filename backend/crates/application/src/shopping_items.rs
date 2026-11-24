@@ -80,18 +80,14 @@ impl<'a> AddShoppingItem<'a> {
             .map_err(ShoppingItemError::InvalidNote)?;
         let item_id = ItemId::try_new(self.id_generator.generate())
             .map_err(|_| ShoppingItemError::InvalidItemId)?;
-        let item = ShoppingItem::new(
-            item_id,
-            name,
-            quantity,
-            unit,
-            note,
-            command.position,
-            actor,
-        );
+        let item = ShoppingItem::new(item_id, name, quantity, unit, note, command.position, actor);
         let next_version = self
             .repository
-            .add_item(list_id.as_str(), command.expected_list_version, item.clone())
+            .add_item(
+                list_id.as_str(),
+                command.expected_list_version,
+                item.clone(),
+            )
             .map_err(map_repository_error)?;
         Ok((item, next_version))
     }
