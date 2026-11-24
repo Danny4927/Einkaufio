@@ -57,8 +57,12 @@ impl<'a> CreatePersonalList<'a> {
 
 fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
     match error {
-        RepositoryError::AlreadyExists => CreatePersonalListError::AlreadyExists,
-        RepositoryError::Unavailable => CreatePersonalListError::PersistenceUnavailable,
+        RepositoryError::AlreadyExists | RepositoryError::Conflict => {
+            CreatePersonalListError::AlreadyExists
+        }
+        RepositoryError::NotFound | RepositoryError::Unavailable => {
+            CreatePersonalListError::PersistenceUnavailable
+        }
     }
 }
 

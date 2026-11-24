@@ -168,6 +168,6 @@ mod tests {
             ShoppingList::ensure_item_exists(&id, &[]),
             Err(ShoppingListMutationError::ItemNotFound)
         );
-        assert!(ShoppingList::ensure_item_exists(&id, &[id.clone()]).is_ok());
+        assert!(ShoppingList::ensure_item_exists(&id, std::slice::from_ref(&id)).is_ok());
     }
 }
