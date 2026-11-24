@@ -1,0 +1,28 @@
+version = 4
+
+[[package]]
+name = "einkaufio-adapters"
+version = "0.1.0"
+dependencies = [
+ "einkaufio-application",
+ "einkaufio-domain",
+]
+
+[[package]]
+name = "einkaufio-api"
+version = "0.1.0"
+dependencies = [
+ "einkaufio-adapters",
+ "einkaufio-application",
+]
+
+[[package]]
+name = "einkaufio-application"
+version = "0.1.0"
+dependencies = [
+ "einkaufio-domain",
+]
+
+[[package]]
+name = "einkaufio-domain"
+version = "0.1.0"

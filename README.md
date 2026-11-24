@@ -9,7 +9,7 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - [Architecture (arc42)](docs/architecture/arc42.md)
 - [Architecture Decision Records](docs/architecture/decisions/README.md)
 - [Data model and DynamoDB access patterns](docs/data-model.md)
-- [OpenAPI 3.1 contract](docs/api/openapi.yaml)
+- [OpenAPI 3.1 contract](contracts/openapi/openapi.yaml)
 - [Implementation roadmap](docs/roadmap.md)
 - [Security model](docs/security.md)
 - [Quality engineering and implementation evidence](docs/quality-engineering.md)
@@ -27,7 +27,7 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - Synchronization: version-based polling, nominally every 15 seconds while a list is visible.
 - Infrastructure: Terraform, including AWS resources; GitHub Actions with AWS OIDC.
 - Frontend quality: automated component/E2E tests plus visual regression tests.
-- Delivery: architecture rules, tests, security checks and Terraform validation are enforced by required CI checks.
+- Delivery: architecture rules, tests, security checks and Terraform validation are intended to become required CI checks; branch protection must be configured separately.
 
 ## Guiding principles
 
@@ -72,6 +72,15 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 
 The exact crate split may evolve with bounded contexts, but dependency direction is fixed. Keep a single repository and a coordinated PR for cross-component contract changes. Avoid introducing multiple independent package managers or build orchestrators without a demonstrated need.
 
+## Developer commands
+
+- `make architecture`: run architecture checker unit tests and inspect the actual Rust workspace dependency graph.
+- `make fmt`, `make lint`, `make test`: run Rust formatting, Clippy and workspace tests.
+- `make terraform-fmt`: check Terraform formatting.
+- `make check`: run the checks currently implemented in this repository.
+
+The commands require Rust stable with rustfmt/Clippy, Python 3.12+ and Terraform 1.10.5+.
+
 ## Status
 
-This repository contains the initial product and architecture baseline. The structure above is the target layout; it is not a claim that all application code or workflows already exist. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
+The repository foundation currently includes the Rust workspace skeleton, initial architecture-boundary checks, Terraform root placeholders and a first CI workflow. The Angular workspace, production Terraform resources, deployment workflows, GitHub branch protection and AWS deployment are not implemented yet. The structure above is a target architecture, not a claim that all components are already operational. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
