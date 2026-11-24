@@ -2,3 +2,9 @@
 //!
 //! This crate must remain independent of frameworks, persistence technology,
 //! AWS SDKs, transport DTOs and serialization libraries.
+
+pub mod identifiers;
+pub mod shopping_list;
+
+pub use identifiers::{IdentifierError, ListId, UserId};
+pub use shopping_list::{ListName, ListNameError, ShoppingList};
