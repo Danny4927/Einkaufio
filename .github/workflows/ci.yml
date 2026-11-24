@@ -48,8 +48,12 @@ jobs:
           node-version-file: apps/web/.nvmrc
           cache: npm
           cache-dependency-path: apps/web/package.json
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Pin npm
+        run: npm install --global npm@10.9.2
+      - name: Resolve exact dependency tree
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install from generated lockfile
+        run: npm ci --no-audit --no-fund
       - name: Production build
         run: npm run build
       - name: Install Playwright browser
@@ -64,6 +68,7 @@ jobs:
           path: |
             apps/web/test-results/
             apps/web/playwright-report/
+            apps/web/package-lock.json
           if-no-files-found: ignore
           retention-days: 14
 
