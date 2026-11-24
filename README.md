@@ -9,7 +9,7 @@ The first client is an Angular PWA. The architecture deliberately keeps the opti
 - [Architecture (arc42)](docs/architecture/arc42.md)
 - [Architecture Decision Records](docs/architecture/decisions/README.md)
 - [Data model and DynamoDB access patterns](docs/data-model.md)
-- [OpenAPI 3.1 contract](docs/api/openapi.yaml)
+- [OpenAPI 3.1 contract](contracts/openapi/openapi.yaml)
 - [Implementation roadmap](docs/roadmap.md)
 - [Security model](docs/security.md)
 - [Quality engineering and implementation evidence](docs/quality-engineering.md)
