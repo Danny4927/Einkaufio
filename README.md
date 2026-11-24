@@ -80,10 +80,10 @@ The exact crate split may evolve with bounded contexts, but dependency direction
 - make check: run the checks currently implemented in this repository.
 - In apps/web: npm install, npm run build, npm run e2e.
 
-The web toolchain is Angular 22.3.0, TypeScript 6.0.3, Node.js 24.15.0 and Playwright 1.65.1. Direct dependency versions are exact. The npm lockfile still needs to be generated and committed before the frontend can be considered fully reproducible.
+The web toolchain is Angular 22.3.0, TypeScript 6.0.3, Node.js 24.15.0 and Playwright 1.65.1. Direct dependency versions and npm are pinned; the committed npm lockfile is verified in CI with npm ci.
 
 The commands require Rust stable with rustfmt/Clippy, Python 3.12+, Terraform 1.10.5+, and Node/npm for the web client.
 
 ## Status
 
-The repository foundation includes the Rust workspace skeleton, architecture-boundary checks, Terraform root placeholders and CI. The Angular workspace, initial landing page, Playwright E2E tests and screenshot smoke capture are implemented in the current frontend work. A committed npm lockfile and reviewed screenshot baselines are still outstanding. Production Terraform resources, deployment workflows, GitHub branch protection and AWS deployment are not implemented yet. The structure above is a target architecture, not a claim that all components are already operational. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
+The repository foundation includes the Rust workspace skeleton, architecture-boundary checks, Terraform root placeholders and CI. The Angular workspace, initial landing page, Playwright E2E tests and screenshot smoke capture are implemented in the current frontend work. A reviewed pixel screenshot baseline is still outstanding. Production Terraform resources, deployment workflows, GitHub branch protection and AWS deployment are not implemented yet. The structure above is a target architecture, not a claim that all components are already operational. Verify current AWS pricing, free-tier eligibility, quotas and regional availability against the target account before production deployment.
