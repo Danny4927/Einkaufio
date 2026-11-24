@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend / fmt-clippy-test-architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rust formatting
+        run: cargo fmt --manifest-path backend/Cargo.toml --all -- --check
+      - name: Clippy
+        run: cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --manifest-path backend/Cargo.toml --workspace
+      - name: Architecture boundaries
+        run: python3 scripts/check_architecture.py
+
+  terraform:
+    name: infrastructure / terraform-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive infra/terraform
