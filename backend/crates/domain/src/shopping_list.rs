@@ -81,7 +81,9 @@ impl ShoppingList {
         self.version += 1;
     }
 
-    pub fn ensure_item_capacity(active_item_count: usize) -> Result<(), ShoppingListMutationError> {
+    pub fn ensure_item_capacity(
+        active_item_count: usize,
+    ) -> Result<(), ShoppingListMutationError> {
         if active_item_count >= Self::MAX_ACTIVE_ITEMS {
             Err(ShoppingListMutationError::ItemLimitReached)
         } else {
