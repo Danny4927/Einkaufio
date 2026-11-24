@@ -1,0 +1,14 @@
+# Architecture Decision Records
+
+| ADR | Decision | Status |
+|---|---|---|
+| [001](001-serverless-aws-and-modular-monolith.md) | Serverless AWS and modular monolith | Accepted |
+| [002](002-cognito-authentication.md) | Cognito for user accounts | Accepted |
+| [003](003-dynamodb-single-table.md) | DynamoDB single-table design | Accepted |
+| [004](004-polling-synchronization.md) | Polling synchronization | Accepted |
+| [005](005-personal-lists-and-households.md) | Personal lists and households | Accepted |
+| [006](006-platform-neutral-api-android.md) | Platform-neutral API and future Android | Accepted |
+| [007](007-angular-web-hosting.md) | Angular on S3 and CloudFront | Accepted |
+| [008](008-invitation-links.md) | Secure invitation links | Accepted |
+
+ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.
