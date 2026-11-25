@@ -42,8 +42,7 @@ impl<'a> RenamePersonalList<'a> {
             UserId::try_new(command.owner_id).map_err(RenamePersonalListError::InvalidOwner)?;
         let list_id =
             ListId::try_new(command.list_id).map_err(RenamePersonalListError::InvalidListId)?;
-        let name =
-            ListName::try_new(command.name).map_err(RenamePersonalListError::InvalidName)?;
+        let name = ListName::try_new(command.name).map_err(RenamePersonalListError::InvalidName)?;
         if command.expected_version == 0 {
             return Err(RenamePersonalListError::InvalidExpectedVersion);
         }
@@ -98,13 +97,13 @@ mod tests {
                 expected_version,
                 name.as_str().to_owned(),
             ));
-            self.result
-                .clone()
-                .unwrap_or_else(|| Ok(ShoppingList::new_personal(
+            self.result.clone().unwrap_or_else(|| {
+                Ok(ShoppingList::new_personal(
                     list_id.clone(),
                     owner_id.clone(),
                     name,
-                )))
+                ))
+            })
         }
     }
 
