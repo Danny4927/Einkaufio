@@ -4,11 +4,15 @@
 //! adapters, HTTP frameworks, AWS SDKs or database clients.
 
 pub mod create_personal_list;
+pub mod list_personal_lists;
 pub mod ports;
 pub mod shopping_items;
 
 pub use create_personal_list::{
     CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError,
+};
+pub use list_personal_lists::{
+    ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery,
 };
 pub use ports::{
     ItemIdGenerator, ListIdGenerator, RepositoryError, ShoppingItemRepository,
