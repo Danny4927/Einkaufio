@@ -12,11 +12,21 @@ pub enum RepositoryError {
     Unavailable,
 }
 
-/// Persists a newly created personal shopping list.
+/// Persists and queries personal shopping lists.
 ///
-/// Implementations must atomically persist the list and the owner's list reference.
+/// Implementations must scope reads to the supplied owner. Never expose a global
+/// list query to application use cases.
 pub trait ShoppingListRepository {
+    /// Persists a newly created personal shopping list.
+    ///
+    /// Implementations must atomically persist the list and the owner's list reference.
     fn create_personal(&self, list: ShoppingList) -> Result<(), RepositoryError>;
+
+    /// Returns only personal lists owned by the authenticated user.
+    fn list_personal_for_owner(
+        &self,
+        owner_id: &UserId,
+    ) -> Result<Vec<ShoppingList>, RepositoryError>;
 }
 
 /// Mutates items owned by a list.
