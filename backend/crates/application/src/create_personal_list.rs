@@ -18,6 +18,7 @@ pub enum CreatePersonalListError {
     InvalidGeneratedId(IdentifierError),
     AlreadyExists,
     PersistenceUnavailable,
+    RepositoryInvariantViolation,
 }
 
 pub struct CreatePersonalList<'a> {
@@ -60,9 +61,12 @@ fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
         RepositoryError::AlreadyExists | RepositoryError::Conflict => {
             CreatePersonalListError::AlreadyExists
         }
-        RepositoryError::NotFound | RepositoryError::Unavailable => {
-            CreatePersonalListError::PersistenceUnavailable
+        // A newly generated list ID cannot legitimately be missing, and the list-create
+        // repository contract has no parent-item operation that could hit the item limit.
+        RepositoryError::NotFound | RepositoryError::ItemLimitReached => {
+            CreatePersonalListError::RepositoryInvariantViolation
         }
+        RepositoryError::Unavailable => CreatePersonalListError::PersistenceUnavailable,
     }
 }
 
@@ -171,8 +175,8 @@ mod tests {
     #[test]
     fn maps_repository_conflict_without_leaking_adapter_details() {
         let repository = FakeRepository {
-            created: RefCell::new(Vec::new()),
             failure: Some(RepositoryError::AlreadyExists),
+            ..Default::default()
         };
         let ids = FixedIdGenerator("list-123");
         let use_case = CreatePersonalList::new(&repository, &ids);
@@ -184,10 +188,25 @@ mod tests {
     }
 
     #[test]
+    fn maps_missing_list_during_create_to_adapter_invariant_violation() {
+        let repository = FakeRepository {
+            failure: Some(RepositoryError::NotFound),
+            ..Default::default()
+        };
+        let ids = FixedIdGenerator("list-123");
+        let use_case = CreatePersonalList::new(&repository, &ids);
+
+        assert_eq!(
+            use_case.execute(command()),
+            Err(CreatePersonalListError::RepositoryInvariantViolation)
+        );
+    }
+
+    #[test]
     fn maps_repository_outage_to_application_error() {
         let repository = FakeRepository {
-            created: RefCell::new(Vec::new()),
             failure: Some(RepositoryError::Unavailable),
+            ..Default::default()
         };
         let ids = FixedIdGenerator("list-123");
         let use_case = CreatePersonalList::new(&repository, &ids);
