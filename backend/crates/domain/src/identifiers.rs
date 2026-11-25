@@ -2,10 +2,15 @@
 
 use std::fmt;
 
+/// A stable identifier for a shopping list.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ListId(String);
+
+/// The authenticated identity of a user (Cognito `sub` in production).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct UserId(String);
+
+/// A stable identifier for a shopping-list item.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ItemId(String);
 
@@ -13,6 +18,7 @@ pub struct ItemId(String);
 pub enum IdentifierError {
     Empty,
     TooLong,
+    ContainsControlCharacters,
 }
 
 macro_rules! identifier {
@@ -25,6 +31,9 @@ macro_rules! identifier {
                 }
                 if value.chars().count() > 128 {
                     return Err(IdentifierError::TooLong);
+                }
+                if value.chars().any(char::is_control) {
+                    return Err(IdentifierError::ContainsControlCharacters);
                 }
                 Ok(Self(value))
             }
@@ -60,11 +69,16 @@ mod tests {
     #[test]
     fn identifiers_reject_values_longer_than_128_characters() {
         let too_long = "x".repeat(129);
-        assert_eq!(
-            ListId::try_new(too_long.clone()),
-            Err(IdentifierError::TooLong)
-        );
+        assert_eq!(ListId::try_new(too_long.clone()), Err(IdentifierError::TooLong));
         assert_eq!(ItemId::try_new(too_long), Err(IdentifierError::TooLong));
+    }
+
+    #[test]
+    fn identifiers_reject_control_characters() {
+        assert_eq!(
+            UserId::try_new("user\n1"),
+            Err(IdentifierError::ContainsControlCharacters)
+        );
     }
 
     #[test]
