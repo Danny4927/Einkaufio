@@ -30,6 +30,7 @@ pub enum ShoppingItemError {
     InvalidNote(ItemValueError),
     InvalidExpectedVersion,
     ItemLimitReached,
+    VersionExhausted,
     NotFound,
     Conflict,
     PersistenceUnavailable,
@@ -191,6 +192,7 @@ fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
         RepositoryError::NotFound => ShoppingItemError::NotFound,
         RepositoryError::Conflict | RepositoryError::AlreadyExists => ShoppingItemError::Conflict,
         RepositoryError::ItemLimitReached => ShoppingItemError::ItemLimitReached,
+        RepositoryError::VersionExhausted => ShoppingItemError::VersionExhausted,
         RepositoryError::Unavailable => ShoppingItemError::PersistenceUnavailable,
     }
 }
@@ -488,6 +490,10 @@ mod tests {
             ),
             (RepositoryError::AlreadyExists, ShoppingItemError::Conflict),
             (RepositoryError::Conflict, ShoppingItemError::Conflict),
+            (
+                RepositoryError::VersionExhausted,
+                ShoppingItemError::VersionExhausted,
+            ),
         ] {
             let repository = FakeRepository {
                 failure: Some(repository_error),
