@@ -481,7 +481,10 @@ mod tests {
     #[test]
     fn maps_item_limit_and_conflict_errors() {
         for (repository_error, expected) in [
-            (RepositoryError::ItemLimitReached, ShoppingItemError::ItemLimitReached),
+            (
+                RepositoryError::ItemLimitReached,
+                ShoppingItemError::ItemLimitReached,
+            ),
             (RepositoryError::AlreadyExists, ShoppingItemError::Conflict),
             (RepositoryError::Conflict, ShoppingItemError::Conflict),
         ] {
