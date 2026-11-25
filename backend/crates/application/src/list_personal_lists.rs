@@ -40,7 +40,8 @@ impl<'a> ListPersonalLists<'a> {
                 RepositoryError::AlreadyExists
                 | RepositoryError::NotFound
                 | RepositoryError::Conflict
-                | RepositoryError::ItemLimitReached => {
+                | RepositoryError::ItemLimitReached
+                | RepositoryError::VersionExhausted => {
                     ListPersonalListsError::RepositoryInvariantViolation
                 }
             })
