@@ -69,7 +69,10 @@ mod tests {
     #[test]
     fn identifiers_reject_values_longer_than_128_characters() {
         let too_long = "x".repeat(129);
-        assert_eq!(ListId::try_new(too_long.clone()), Err(IdentifierError::TooLong));
+        assert_eq!(
+            ListId::try_new(too_long.clone()),
+            Err(IdentifierError::TooLong)
+        );
         assert_eq!(ItemId::try_new(too_long), Err(IdentifierError::TooLong));
     }
 
