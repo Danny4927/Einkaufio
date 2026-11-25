@@ -53,7 +53,7 @@ jobs:
           retention-days: 14
 
   terraform:
-    name: infrastructure / terraform-format
+    name: infrastructure / terraform-format-validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
