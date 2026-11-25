@@ -121,6 +121,7 @@ impl ShoppingItem {
         &self.created_by
     }
 
+    /// Applies a check-state change and advances the item version only when needed.
     pub fn set_checked(&mut self, checked: bool) -> bool {
         if self.checked == checked {
             return false;
@@ -151,10 +152,7 @@ mod tests {
     #[test]
     fn values_are_normalized_and_bounded() {
         assert_eq!(ItemName::try_new("  Milch ").unwrap().as_str(), "Milch");
-        assert_eq!(
-            ItemQuantity::try_new("x".repeat(41)),
-            Err(ItemValueError::TooLong)
-        );
+        assert_eq!(ItemQuantity::try_new("x".repeat(41)), Err(ItemValueError::TooLong));
         assert_eq!(ItemUnit::try_new(" "), Err(ItemValueError::Empty));
         assert_eq!(
             ItemNote::try_new("a\nb"),
@@ -164,23 +162,23 @@ mod tests {
 
     #[test]
     fn new_item_starts_unchecked_at_version_one() {
-        let i = item();
-        assert!(!i.checked());
-        assert_eq!(i.version(), 1);
-        assert_eq!(i.name().as_str(), "Milch");
-        assert_eq!(i.quantity().unwrap().as_str(), "2");
-        assert_eq!(i.unit().unwrap().as_str(), "Liter");
+        let item = item();
+        assert!(!item.checked());
+        assert_eq!(item.version(), 1);
+        assert_eq!(item.name().as_str(), "Milch");
+        assert_eq!(item.quantity().unwrap().as_str(), "2");
+        assert_eq!(item.unit().unwrap().as_str(), "Liter");
     }
 
     #[test]
     fn checking_changes_state_and_increments_once() {
-        let mut i = item();
-        assert!(i.set_checked(true));
-        assert!(i.checked());
-        assert_eq!(i.version(), 2);
-        assert!(!i.set_checked(true));
-        assert_eq!(i.version(), 2);
-        assert!(i.set_checked(false));
-        assert_eq!(i.version(), 3);
+        let mut item = item();
+        assert!(item.set_checked(true));
+        assert!(item.checked());
+        assert_eq!(item.version(), 2);
+        assert!(!item.set_checked(true));
+        assert_eq!(item.version(), 2);
+        assert!(item.set_checked(false));
+        assert_eq!(item.version(), 3);
     }
 }
