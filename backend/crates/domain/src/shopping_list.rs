@@ -2,6 +2,39 @@
 
 use crate::identifiers::{ListId, UserId};
 
+/// A positive, monotonically increasing aggregate version.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct AggregateVersion(u64);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AggregateVersionError {
+    Zero,
+}
+
+impl AggregateVersion {
+    pub fn try_new(value: u64) -> Result<Self, AggregateVersionError> {
+        if value == 0 {
+            return Err(AggregateVersionError::Zero);
+        }
+        Ok(Self(value))
+    }
+
+    pub const fn initial() -> Self {
+        Self(1)
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    pub fn checked_next(self) -> Result<Self, ListMutationError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or(ListMutationError::VersionExhausted)
+    }
+}
+
 /// A validated shopping-list name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListName(String);
@@ -12,7 +45,7 @@ pub struct ShoppingList {
     id: ListId,
     owner_id: UserId,
     name: ListName,
-    version: u64,
+    version: AggregateVersion,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,23 +92,21 @@ impl ShoppingList {
             id,
             owner_id,
             name,
-            version: 1,
+            version: AggregateVersion::initial(),
         }
     }
 
     /// Renames this aggregate and advances its version when the name changes.
     ///
-    /// The persistence adapter must still compare the caller's expected version and
-    /// commit this state atomically with its stored representation.
+    /// Persistence adapters must compare the supplied expected version with the stored
+    /// aggregate version before invoking this method, including for an unchanged name.
+    /// That ordering ensures a stale no-op rename still returns a version conflict.
     pub fn rename(&mut self, name: ListName) -> Result<(), ListMutationError> {
         if self.name == name {
             return Ok(());
         }
 
-        self.version = self
-            .version
-            .checked_add(1)
-            .ok_or(ListMutationError::VersionExhausted)?;
+        self.version = self.version.checked_next()?;
         self.name = name;
         Ok(())
     }
@@ -92,14 +123,22 @@ impl ShoppingList {
         &self.name
     }
 
-    pub fn version(&self) -> u64 {
+    /// Returns the aggregate version as its transport/storage representation.
+    pub const fn version(&self) -> u64 {
+        self.version.as_u64()
+    }
+
+    pub const fn aggregate_version(&self) -> AggregateVersion {
         self.version
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ListMutationError, ListName, ListNameError, ShoppingList};
+    use super::{
+        AggregateVersion, AggregateVersionError, ListMutationError, ListName, ListNameError,
+        ShoppingList,
+    };
     use crate::identifiers::{ListId, UserId};
 
     fn list() -> ShoppingList {
@@ -108,6 +147,15 @@ mod tests {
             UserId::try_new("user-1").expect("valid user id"),
             ListName::try_new("Einkauf").expect("valid list name"),
         )
+    }
+
+    #[test]
+    fn aggregate_version_rejects_zero_and_accepts_positive_values() {
+        assert_eq!(
+            AggregateVersion::try_new(0),
+            Err(AggregateVersionError::Zero)
+        );
+        assert_eq!(AggregateVersion::try_new(1).unwrap().as_u64(), 1);
     }
 
     #[test]
@@ -137,6 +185,7 @@ mod tests {
     fn personal_list_starts_at_version_one() {
         let list = list();
         assert_eq!(list.version(), 1);
+        assert_eq!(list.aggregate_version(), AggregateVersion::initial());
         assert_eq!(list.name().as_str(), "Einkauf");
         assert_eq!(list.owner_id().as_str(), "user-1");
     }
@@ -165,7 +214,7 @@ mod tests {
     #[test]
     fn rename_does_not_mutate_when_version_is_exhausted() {
         let mut list = list();
-        list.version = u64::MAX;
+        list.version = AggregateVersion::try_new(u64::MAX).unwrap();
 
         assert_eq!(
             list.rename(ListName::try_new("Neu").unwrap()),
