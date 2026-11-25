@@ -1,26 +1,22 @@
 //! Owner-scoped personal-list deletion use case.
 
-use einkaufio_domain::{IdentifierError, ListId, UserId};
+use einkaufio_domain::{AggregateVersion, IdentifierError, ListId, UserId};
 
 use crate::ports::{RepositoryError, ShoppingListRepository};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeletePersonalListCommand {
     /// Identity from verified authentication context, never from client input.
-    pub owner_id: String,
+    pub actor_id: String,
     pub list_id: String,
-    pub expected_version: u64,
+    pub expected_version: AggregateVersion,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeletePersonalListError {
-    InvalidOwner(IdentifierError),
+    InvalidActor(IdentifierError),
     InvalidListId(IdentifierError),
-    InvalidExpectedVersion,
-    NotFound,
-    Conflict,
-    PersistenceUnavailable,
-    RepositoryInvariantViolation,
+    Repository(RepositoryError),
 }
 
 pub struct DeletePersonalList<'a> {
@@ -36,28 +32,14 @@ impl<'a> DeletePersonalList<'a> {
         &self,
         command: DeletePersonalListCommand,
     ) -> Result<(), DeletePersonalListError> {
-        let owner_id =
-            UserId::try_new(command.owner_id).map_err(DeletePersonalListError::InvalidOwner)?;
+        let actor_id =
+            UserId::try_new(command.actor_id).map_err(DeletePersonalListError::InvalidActor)?;
         let list_id =
             ListId::try_new(command.list_id).map_err(DeletePersonalListError::InvalidListId)?;
-        if command.expected_version == 0 {
-            return Err(DeletePersonalListError::InvalidExpectedVersion);
-        }
 
         self.repository
-            .delete_personal(&owner_id, &list_id, command.expected_version)
-            .map_err(map_repository_error)
-    }
-}
-
-fn map_repository_error(error: RepositoryError) -> DeletePersonalListError {
-    match error {
-        RepositoryError::NotFound => DeletePersonalListError::NotFound,
-        RepositoryError::Conflict => DeletePersonalListError::Conflict,
-        RepositoryError::Unavailable => DeletePersonalListError::PersistenceUnavailable,
-        RepositoryError::AlreadyExists | RepositoryError::ItemLimitReached => {
-            DeletePersonalListError::RepositoryInvariantViolation
-        }
+            .delete_personal(&actor_id, &list_id, command.expected_version)
+            .map_err(DeletePersonalListError::Repository)
     }
 }
 
@@ -65,15 +47,16 @@ fn map_repository_error(error: RepositoryError) -> DeletePersonalListError {
 mod tests {
     use std::cell::RefCell;
 
-    use einkaufio_domain::{ListId, ShoppingList, UserId};
+    use einkaufio_domain::{AggregateVersion, ListId, ShoppingList, UserId};
 
     use super::{DeletePersonalList, DeletePersonalListCommand, DeletePersonalListError};
     use crate::ports::{RepositoryError, ShoppingListRepository};
 
     #[derive(Default)]
     struct FakeRepository {
-        call: RefCell<Option<(UserId, ListId, u64)>>,
-        result: Option<Result<(), RepositoryError>>,
+        deleted: RefCell<bool>,
+        failure: Option<RepositoryError>,
+        call: RefCell<Option<(UserId, ListId, AggregateVersion)>>,
     }
 
     impl ShoppingListRepository for FakeRepository {
@@ -83,78 +66,100 @@ mod tests {
 
         fn delete_personal(
             &self,
-            owner_id: &UserId,
+            actor_id: &UserId,
             list_id: &ListId,
-            expected_version: u64,
+            expected_version: AggregateVersion,
         ) -> Result<(), RepositoryError> {
-            *self.call.borrow_mut() = Some((owner_id.clone(), list_id.clone(), expected_version));
-            self.result.clone().unwrap_or(Ok(()))
+            *self.call.borrow_mut() =
+                Some((actor_id.clone(), list_id.clone(), expected_version));
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
+            let mut deleted = self.deleted.borrow_mut();
+            if *deleted {
+                return Err(RepositoryError::NotFound);
+            }
+            *deleted = true;
+            Ok(())
         }
     }
 
     fn command() -> DeletePersonalListCommand {
         DeletePersonalListCommand {
-            owner_id: "user-1".to_owned(),
+            actor_id: "user-1".to_owned(),
             list_id: "list-1".to_owned(),
-            expected_version: 3,
+            expected_version: AggregateVersion::try_new(3).unwrap(),
         }
     }
 
     #[test]
-    fn passes_authenticated_owner_and_expected_version_to_repository() {
+    fn passes_actor_and_expected_version_to_repository() {
         let repository = FakeRepository::default();
         let use_case = DeletePersonalList::new(&repository);
 
         use_case.execute(command()).expect("delete should succeed");
 
         let call = repository.call.borrow();
-        let (owner, list, version) = call.as_ref().expect("repository called");
-        assert_eq!(owner.as_str(), "user-1");
+        let (actor, list, version) = call.as_ref().expect("repository called");
+        assert_eq!(actor.as_str(), "user-1");
         assert_eq!(list.as_str(), "list-1");
-        assert_eq!(*version, 3);
+        assert_eq!(*version, AggregateVersion::try_new(3).unwrap());
     }
 
     #[test]
-    fn rejects_zero_expected_version_before_repository_access() {
+    fn rejects_invalid_actor_and_list_id_before_repository_access() {
+        for invalid in [
+            DeletePersonalListCommand {
+                actor_id: " ".to_owned(),
+                ..command()
+            },
+            DeletePersonalListCommand {
+                list_id: " ".to_owned(),
+                ..command()
+            },
+        ] {
+            let repository = FakeRepository::default();
+            let use_case = DeletePersonalList::new(&repository);
+
+            assert!(use_case.execute(invalid).is_err());
+            assert!(repository.call.borrow().is_none());
+        }
+    }
+
+    #[test]
+    fn repeated_delete_returns_not_found() {
         let repository = FakeRepository::default();
         let use_case = DeletePersonalList::new(&repository);
-        let invalid = DeletePersonalListCommand {
-            expected_version: 0,
-            ..command()
-        };
 
-        assert_eq!(
-            use_case.execute(invalid),
-            Err(DeletePersonalListError::InvalidExpectedVersion)
-        );
-        assert!(repository.call.borrow().is_none());
-    }
-
-    #[test]
-    fn maps_stale_version_to_conflict() {
-        let repository = FakeRepository {
-            result: Some(Err(RepositoryError::Conflict)),
-            ..Default::default()
-        };
-        let use_case = DeletePersonalList::new(&repository);
-
+        use_case.execute(command()).expect("first delete succeeds");
         assert_eq!(
             use_case.execute(command()),
-            Err(DeletePersonalListError::Conflict)
+            Err(DeletePersonalListError::Repository(
+                RepositoryError::NotFound
+            ))
         );
     }
 
     #[test]
-    fn maps_missing_or_not_owned_list_to_not_found() {
-        let repository = FakeRepository {
-            result: Some(Err(RepositoryError::NotFound)),
-            ..Default::default()
-        };
-        let use_case = DeletePersonalList::new(&repository);
+    fn propagates_repository_failures_including_version_exhaustion() {
+        for error in [
+            RepositoryError::NotFound,
+            RepositoryError::Conflict,
+            RepositoryError::Unavailable,
+            RepositoryError::AlreadyExists,
+            RepositoryError::ItemLimitReached,
+            RepositoryError::VersionExhausted,
+        ] {
+            let repository = FakeRepository {
+                failure: Some(error.clone()),
+                ..Default::default()
+            };
+            let use_case = DeletePersonalList::new(&repository);
 
-        assert_eq!(
-            use_case.execute(command()),
-            Err(DeletePersonalListError::NotFound)
-        );
+            assert_eq!(
+                use_case.execute(command()),
+                Err(DeletePersonalListError::Repository(error))
+            );
+        }
     }
 }
