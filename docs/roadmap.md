@@ -16,10 +16,36 @@
 - [x] Add local make verify covering the current CI validation jobs, plus focused backend targets.
 - [x] Add PR evidence/security checklist.
 - [x] Add opt-in Claude Code permission and commit-hook guardrail examples.
-- [ ] Add and enforce repository Contract-Test suites for list and item repository ports with shared scenarios run against the fake and every production adapter.
-- [ ] Introduce a claims-derived verified actor at the API authentication boundary; prohibit construction from client payloads.
-- [ ] Add dependency policy and security/dependency scanners (cargo-deny, mutation testing and coverage threshold) after selecting and pinning their policy/configuration.
-- [ ] Configure GitHub ruleset/branch protection with stable CI job names as required checks.
+- [ ] **Repository contract tests (highest priority):** extract reusable behavioral scenarios for `ShoppingListRepository` and `ShoppingItemRepository`; run them against the in-memory fake now and every production adapter when introduced.
+  - Acceptance: tests cover authorization before existence disclosure, fail-closed/unavailable operations, atomic expected-version checks (including stale no-op rename), list/item version consistency, item capacity/position behavior, and repeated-delete semantics.
+  - Acceptance: contract scenarios are independent of adapter implementation and run in CI; adapter-specific integration tests cover transaction/conditional-write behavior.
+  - Sequencing: add list contract cases, add item contract cases, wire fake adapter, then require the same suite from the DynamoDB adapter PR. Do not claim production-adapter coverage before that adapter exists.
+- [ ] **Verified actor at the authentication boundary:** introduce a type (e.g. `VerifiedActor`) that can only be created from successfully verified Cognito claims/principal data.
+  - Acceptance: request DTOs cannot provide owner/actor identity; no public constructor/from-string conversion exists for untrusted input; application use cases receive the verified actor explicitly.
+  - Tests: valid claims produce the actor; missing/invalid/expired/wrong-audience tokens fail before use-case invocation; client-supplied owner/actor fields are ignored or rejected.
+  - Sequencing: implement alongside Cognito JWT verification in M2, not as an isolated string newtype before the trust boundary exists.
+- [ ] **Dependency and test-strength tooling:** add a pinned `cargo-deny` policy first, then mutation testing with `cargo-mutants` scoped to domain/application, and finally a coverage threshold once a stable baseline exists.
+  - Acceptance: CI fails on configured license/advisory/ban/source violations; mutation report identifies surviving mutants; coverage threshold is documented, measured and ratcheted rather than chosen arbitrarily.
+  - Keep fast local targets available; expensive mutation runs may be a separate CI job or scheduled workflow.
+- [ ] **GitHub merge protection:** configure a repository ruleset/branch protection after CI check names are stable.
+  - Acceptance: PR required, direct pushes/force pushes blocked, architecture/backend/web/E2E/Terraform checks required, and production deployment protected by environment approval.
+  - Note: this is repository configuration, not something a committed workflow file enforces by itself.
+- [ ] **Agent review automation:** evaluate Claude Code GitHub Action only after checking its current official setup/security documentation.
+  - Acceptance: PR review is advisory (not an auto-merge authority), uses least-privilege permissions, does not expose secrets, and its findings are visible as a PR check/comment.
+  - Keep human review and required CI as merge gates; document cost, token permissions and failure behavior before enabling.
+- [ ] **Claude Code runtime hook activation:** wire the checked-in helper into the actual Claude Code `PreToolUse` hook configuration when the execution environment supports it.
+  - Acceptance: demonstrate that a commit command triggers `make check`; document bypass/limitations. Repository presence alone is not considered activation.
+
+## Open follow-up plan (ordered)
+
+1. Repository contract tests: implement shared list/item scenarios against current fakes; expand them when the DynamoDB adapter is introduced.
+2. Verified actor: implement together with Cognito JWT verification in M2 so construction is anchored to verified claims.
+3. Dependency controls: pin cargo-deny policy; add scoped cargo-mutants; establish and then enforce coverage baseline.
+4. Merge protection: configure required checks/ruleset once stable job names are confirmed.
+5. Agent review automation: assess the official Claude GitHub Action documentation and security/permissions before enabling.
+6. Claude hooks: activate and verify the optional commit hook in the real Claude Code runtime.
+
+These follow-ups are intentionally not marked complete by adding documentation alone. Each requires implementation evidence and CI/repository configuration evidence.
 
 ## v1 product scope
 
