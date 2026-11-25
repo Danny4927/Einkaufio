@@ -63,7 +63,9 @@ fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
         }
         // A newly generated list ID cannot legitimately be missing, and the list-create
         // repository contract has no parent-item operation that could hit the item limit.
-        RepositoryError::NotFound | RepositoryError::ItemLimitReached => {
+        RepositoryError::NotFound
+        | RepositoryError::ItemLimitReached
+        | RepositoryError::VersionExhausted => {
             CreatePersonalListError::RepositoryInvariantViolation
         }
         RepositoryError::Unavailable => CreatePersonalListError::PersistenceUnavailable,
