@@ -201,16 +201,17 @@ Implemented in the backend workspace:
 - [x] Pure domain types for list/user identifiers, validated list names and personal shopping lists.
 - [x] Initial aggregate version is 1.
 - [x] Application use cases for creating and listing personal lists.
-- [x] Owner-scoped rename and delete use cases with expected-version validation.
-- [x] Domain rename behavior increments the aggregate version only when the name changes.
-- [x] Application-owned repository and ID-generation ports; no database or framework dependency.
-- [x] Fake-repository tests for owner scoping, validation, conflicts and persistence errors.
+- [x] Actor-scoped rename and delete use cases with a validated AggregateVersion value object.
+- [x] Domain rename behavior increments the aggregate version only when the name changes and safely reports version exhaustion.
+- [x] Repository errors explicitly represent version exhaustion; mutation use cases preserve repository failure semantics without duplicated mapping.
+- [x] Fake-repository tests for actor scoping, invalid inputs, successful version increments, stale no-op rename conflicts, repeated-delete NotFound semantics and repository failures.
+- [x] Port contracts document atomic expected-version checks before no-op rename detection and NotFound for repeated deletion.
 
 Still required before the personal-list capability is complete:
 - [ ] Authenticated HTTP handler that derives owner ID exclusively from verified Cognito claims.
 - [ ] Concrete ID generator and persistence adapter.
 - [ ] Atomic persistence of list metadata and owner index/reference.
-- [ ] API contract tests and adapter contract tests.
+- [ ] API contract tests and adapter contract tests (including stale-version no-op rename conflict, atomic version comparison and repeated-delete NotFound).
 - [ ] List detail query and cursor-based pagination.
 - [ ] Angular list overview/create/edit flow and reviewed visual regression.
 - [ ] Authorization and concurrency integration tests.
