@@ -4,12 +4,33 @@
       "Bash(terraform apply *)",
       "Bash(terraform destroy *)",
       "Bash(terraform import *)",
+      "Bash(terraform state *)",
+      "Bash(terraform force-unlock *)",
+      "Bash(aws *)",
       "Bash(printenv *)",
       "Bash(env)",
+      "Bash(git push --force*)",
+      "Bash(git -C * push --force*)",
       "Read(**/.env)",
       "Read(**/.env.*)",
-      "Read(**/*secret*)",
-      "Read(**/*credentials*)"
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.*)",
+      "Read(**/*.tfplan)",
+      "Read(**/*.pem)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-commit-check.sh",
+            "timeout": 600
+          }
+        ]
+      }
     ]
   }
 }
