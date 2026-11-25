@@ -12,7 +12,7 @@ The repository uses AI coding agents alongside human review. Agents need a conci
 - Keep repository-wide instructions in root AGENTS.md; link to canonical architecture, security, quality and roadmap documents instead of duplicating them.
 - Provide make verify as the local entry point mirroring the CI jobs, with narrower targets for fast feedback.
 - Use a PR template to require acceptance criteria, verification evidence, security review and roadmap updates.
-- Provide opt-in Claude Code deny rules and a commit-check hook helper. Runtime hook activation must be configured and verified by each execution environment; repository files alone cannot guarantee it.
+- Provide Claude Code project deny rules and register the commit-check helper as a Bash `PreToolUse` hook in project settings. The hook parses the documented JSON stdin payload and runs `make check` before matching commit commands. Runtime loading still depends on the environment trusting/loading project settings; verify with `/hooks` and `/status`. Permission rules and hooks are defense-in-depth, not an OS sandbox.
 - Introduce typed authenticated principals and repository contract tests incrementally at the actual trust/persistence boundaries. Do not use marker types that can be constructed from unverified client input or claim adapter semantics that have no adapter implementation yet.
 
 ## Consequences
