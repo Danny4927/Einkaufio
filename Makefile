@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 WEB_DIR := apps/web
-TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -printf '%h\n' | sort -u)
+TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -exec dirname {} \; | sort -u)
 PLAYWRIGHT_INSTALL ?= npx playwright install chromium
 
 .PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate web-install web-build web-e2e web-e2e-setup agent-config-check
