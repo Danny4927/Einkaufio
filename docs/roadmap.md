@@ -16,6 +16,7 @@
 - [x] Add local make verify plus focused targets; CI invokes the same Makefile targets (see CI workflow).
 - [x] Add PR evidence/security guidance.
 - [x] Register the Claude Code PreToolUse commit hook and add a deterministic hook test. A real Claude Code runtime commit test remains environment-specific.
+- [ ] **Verify the hook in a real Claude Code runtime:** confirm it appears in `/hooks` and project settings in `/status`, then make a disposable test commit and capture evidence that `make check` ran before Git executed the commit. Do not treat the fixture test as a runtime integration test.
 - [ ] **Repository contract tests (highest priority):** extract reusable behavioral scenarios for `ShoppingListRepository` and `ShoppingItemRepository`; run them against the in-memory fake now and every production adapter when introduced.
   - Acceptance: tests cover authorization before existence disclosure, fail-closed/unavailable operations, atomic expected-version checks (including stale no-op rename), list/item version consistency, item capacity/position behavior, and repeated-delete semantics.
   - Acceptance: contract scenarios are independent of adapter implementation and run in CI; adapter-specific integration tests cover transaction/conditional-write behavior.
