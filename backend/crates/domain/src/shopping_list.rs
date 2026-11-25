@@ -99,7 +99,7 @@ impl ShoppingList {
 
 #[cfg(test)]
 mod tests {
-    use super::{ListName, ListNameError, ListMutationError, ShoppingList};
+    use super::{ListMutationError, ListName, ListNameError, ShoppingList};
     use crate::identifiers::{ListId, UserId};
 
     fn list() -> ShoppingList {
