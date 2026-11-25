@@ -1,33 +1,38 @@
 ## Summary
 
-<!-- What changed and why? -->
+What changed and why?
 
-## Acceptance criteria
+## Tracking
 
-- [ ] Each acceptance criterion is addressed.
+Closes #123, or N/A + reason.
+
+## Acceptance criteria and evidence
+
+List each criterion separately and link its evidence. Avoid blanket checkboxes.
+
+- Criterion:
+- Evidence link:
 
 ## Verification
 
-- [ ] Focused tests/checks run.
-- [ ] make verify run locally, or unavailable checks are explained below.
-- [ ] Required GitHub Actions CI checks are green.
+- Commands and results:
+- CI run / required check links:
+- Not run: N/A or reason and impact.
 
 ## Security and architecture
 
-- [ ] Actor identity is derived only from verified Cognito claims.
-- [ ] Authorization happens before resource existence can be disclosed.
-- [ ] Repository operations fail closed.
-- [ ] Expected-version checks and multi-record mutations are atomic.
-- [ ] Domain/application dependency boundaries remain intact.
-- [ ] No secrets, tokens, or invitation material are logged.
+- Actor / authorization:
+- Failure and concurrency behavior:
+- Architecture boundaries:
+- Secret/logging review:
+- N/A + reason where irrelevant.
 
 ## Documentation and evidence
 
-- [ ] docs/roadmap.md updated when implementation status changes.
-- [ ] ADR/security/OpenAPI/quality docs updated where applicable.
-- [ ] UI screenshots/visual diffs included for visual changes.
-- [ ] Terraform plan and risk review included for infrastructure changes.
+- Roadmap / ADR / security / OpenAPI updated, or N/A + reason:
+- UI screenshots / visual diffs, or N/A + reason:
+- Terraform plan / risk review, or N/A + reason:
 
-## Limitations
+## Limitations and rollback
 
-<!-- List skipped checks, known limitations, migration/rollback considerations. -->
+Known limitations, skipped checks, migration and rollback.
