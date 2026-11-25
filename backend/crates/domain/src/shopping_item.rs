@@ -152,7 +152,10 @@ mod tests {
     #[test]
     fn values_are_normalized_and_bounded() {
         assert_eq!(ItemName::try_new("  Milch ").unwrap().as_str(), "Milch");
-        assert_eq!(ItemQuantity::try_new("x".repeat(41)), Err(ItemValueError::TooLong));
+        assert_eq!(
+            ItemQuantity::try_new("x".repeat(41)),
+            Err(ItemValueError::TooLong)
+        );
         assert_eq!(ItemUnit::try_new(" "), Err(ItemValueError::Empty));
         assert_eq!(
             ItemNote::try_new("a\nb"),
