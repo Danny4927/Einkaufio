@@ -89,7 +89,10 @@ mod tests {
     #[test]
     fn list_name_rejects_empty_and_overlong_values() {
         assert_eq!(ListName::try_new("  "), Err(ListNameError::Empty));
-        assert_eq!(ListName::try_new("x".repeat(121)), Err(ListNameError::TooLong));
+        assert_eq!(
+            ListName::try_new("x".repeat(121)),
+            Err(ListNameError::TooLong)
+        );
     }
 
     #[test]
