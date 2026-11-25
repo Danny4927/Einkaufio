@@ -1,6 +1,6 @@
 //! Outbound ports owned by the application layer.
 
-use einkaufio_domain::{ItemId, ShoppingItem, ShoppingList, UserId};
+use einkaufio_domain::{ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId};
 
 /// Persistence failures exposed by repository ports without storage-specific details.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,8 +14,9 @@ pub enum RepositoryError {
 
 /// Persists and queries personal shopping lists.
 ///
-/// Implementations must scope reads to the supplied owner. Never expose a global
-/// list query to application use cases.
+/// Implementations must scope reads and mutations to the supplied owner. Never expose a
+/// global list query to application use cases. For mutations, adapters must authorize the
+/// owner before disclosing whether a list exists.
 pub trait ShoppingListRepository {
     /// Persists a newly created personal shopping list.
     ///
@@ -29,6 +30,33 @@ pub trait ShoppingListRepository {
         &self,
         _owner_id: &UserId,
     ) -> Result<Vec<ShoppingList>, RepositoryError> {
+        Err(RepositoryError::Unavailable)
+    }
+
+    /// Renames an owned list and returns its new aggregate state.
+    ///
+    /// The adapter must authorize the actor before revealing list existence, compare
+    /// expected_version, apply the domain rename, and persist the new state atomically.
+    fn rename_personal(
+        &self,
+        _actor_id: &UserId,
+        _list_id: &ListId,
+        _expected_version: u64,
+        _name: ListName,
+    ) -> Result<ShoppingList, RepositoryError> {
+        Err(RepositoryError::Unavailable)
+    }
+
+    /// Deletes an owned list and its owner index/reference atomically.
+    ///
+    /// The adapter must authorize the actor before revealing list existence and compare
+    /// expected_version in the same transaction as deletion.
+    fn delete_personal(
+        &self,
+        _actor_id: &UserId,
+        _list_id: &ListId,
+        _expected_version: u64,
+    ) -> Result<(), RepositoryError> {
         Err(RepositoryError::Unavailable)
     }
 }
