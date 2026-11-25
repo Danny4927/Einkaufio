@@ -70,8 +70,7 @@ mod tests {
             list_id: &ListId,
             expected_version: AggregateVersion,
         ) -> Result<(), RepositoryError> {
-            *self.call.borrow_mut() =
-                Some((actor_id.clone(), list_id.clone(), expected_version));
+            *self.call.borrow_mut() = Some((actor_id.clone(), list_id.clone(), expected_version));
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
