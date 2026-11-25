@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+cd "$repo_root" || exit 1
 python3 -m json.tool .claude/settings.json >/dev/null
 bash -n .claude/hooks/pre-commit-check-stdin.sh
 if command -v shellcheck >/dev/null 2>&1; then
