@@ -87,8 +87,7 @@ mod tests {
             list_id: &ListId,
             expected_version: u64,
         ) -> Result<(), RepositoryError> {
-            *self.call.borrow_mut() =
-                Some((owner_id.clone(), list_id.clone(), expected_version));
+            *self.call.borrow_mut() = Some((owner_id.clone(), list_id.clone(), expected_version));
             self.result.clone().unwrap_or(Ok(()))
         }
     }
