@@ -200,17 +200,19 @@ The following foundation work is a prerequisite to feature implementation. Keep 
 Implemented in the backend workspace:
 - [x] Pure domain types for list/user identifiers, validated list names and personal shopping lists.
 - [x] Initial aggregate version is 1.
-- [x] Application use case for creating a personal list.
+- [x] Application use cases for creating and listing personal lists.
+- [x] Owner-scoped rename and delete use cases with expected-version validation.
+- [x] Domain rename behavior increments the aggregate version only when the name changes.
 - [x] Application-owned repository and ID-generation ports; no database or framework dependency.
-- [x] Fake-repository tests for success, invalid input, ID generation failure and persistence errors.
+- [x] Fake-repository tests for owner scoping, validation, conflicts and persistence errors.
 
 Still required before the personal-list capability is complete:
 - [ ] Authenticated HTTP handler that derives owner ID exclusively from verified Cognito claims.
 - [ ] Concrete ID generator and persistence adapter.
 - [ ] Atomic persistence of list metadata and owner index/reference.
 - [ ] API contract tests and adapter contract tests.
-- [ ] List query, rename and delete use cases.
-- [ ] Angular list overview/create flow and reviewed visual regression.
+- [ ] List detail query and cursor-based pagination.
+- [ ] Angular list overview/create/edit flow and reviewed visual regression.
 - [ ] Authorization and concurrency integration tests.
 
-The current use case is an executable application-layer slice, not yet an API endpoint or deployable feature.
+The application use cases are executable and tested with fake ports, but are not yet wired to HTTP or deployable persistence.
