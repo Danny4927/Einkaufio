@@ -13,9 +13,9 @@
 ## Agent and quality foundation (ADR 012)
 
 - [x] Add concise root agent instructions and canonical documentation links.
-- [x] Add local make verify covering the current CI validation jobs, plus focused backend targets.
-- [x] Add PR evidence/security checklist.
-- [x] Add opt-in Claude Code permission and commit-hook guardrail examples.
+- [x] Add local make verify plus focused targets; CI invokes the same Makefile targets (see CI workflow).
+- [x] Add PR evidence/security guidance.
+- [x] Register the Claude Code PreToolUse commit hook and add a deterministic hook test. A real Claude Code runtime commit test remains environment-specific.
 - [ ] **Repository contract tests (highest priority):** extract reusable behavioral scenarios for `ShoppingListRepository` and `ShoppingItemRepository`; run them against the in-memory fake now and every production adapter when introduced.
   - Acceptance: tests cover authorization before existence disclosure, fail-closed/unavailable operations, atomic expected-version checks (including stale no-op rename), list/item version consistency, item capacity/position behavior, and repeated-delete semantics.
   - Acceptance: contract scenarios are independent of adapter implementation and run in CI; adapter-specific integration tests cover transaction/conditional-write behavior.
@@ -33,19 +33,6 @@
 - [ ] **Agent review automation:** evaluate Claude Code GitHub Action only after checking its current official setup/security documentation.
   - Acceptance: PR review is advisory (not an auto-merge authority), uses least-privilege permissions, does not expose secrets, and its findings are visible as a PR check/comment.
   - Keep human review and required CI as merge gates; document cost, token permissions and failure behavior before enabling.
-- [ ] **Claude Code runtime hook activation:** wire the checked-in helper into the actual Claude Code `PreToolUse` hook configuration when the execution environment supports it.
-  - Acceptance: demonstrate that a commit command triggers `make check`; document bypass/limitations. Repository presence alone is not considered activation.
-
-## Open follow-up plan (ordered)
-
-1. Repository contract tests: implement shared list/item scenarios against current fakes; expand them when the DynamoDB adapter is introduced.
-2. Verified actor: implement together with Cognito JWT verification in M2 so construction is anchored to verified claims.
-3. Dependency controls: pin cargo-deny policy; add scoped cargo-mutants; establish and then enforce coverage baseline.
-4. Merge protection: configure required checks/ruleset once stable job names are confirmed.
-5. Agent review automation: assess the official Claude GitHub Action documentation and security/permissions before enabling.
-6. Claude hooks: activate and verify the optional commit hook in the real Claude Code runtime.
-
-These follow-ups are intentionally not marked complete by adding documentation alone. Each requires implementation evidence and CI/repository configuration evidence.
 
 ## v1 product scope
 
@@ -73,6 +60,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 ## Milestones and GitHub-ready work packages
 
 ### M0 – Repository foundation
+
 - [ ] Add license and contribution guidelines.
 - [ ] Add ADR and OpenAPI validation to CI.
 - [x] Define Rust workspace and Angular app structure.
@@ -81,7 +69,37 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [ ] Add local development and environment configuration docs.
 - Evidence: clean CI run, architecture check output, documented project tree and reproducible local setup.
 
+### M0a – Monorepo skeleton and developer experience
+
+- [x] Establish the agreed top-level layout: `apps/web`, `backend`, `infra/terraform`, `contracts/openapi`, `tests`, `docs`, `.github/workflows`.
+- [ ] Move the existing OpenAPI contract into `contracts/openapi` and update references (or keep a compatibility pointer during transition).
+- [x] Establish Rust workspace crates for domain, application, adapters and API/composition root.
+- [x] Add Angular app under `apps/web`; pin Node/package manager and commit lockfiles.
+- [x] Add root-level developer commands/documentation that invoke each toolchain reproducibly.
+- [ ] Add path-aware CI orchestration with safe dependency triggers.
+- Evidence: clean checkout setup on CI, workspace builds, Angular build, lockfile consistency and documented tree.
+
+### M0b – Architecture enforcement
+
+- [ ] Add Rust dependency rules that reject forbidden crate edges beyond the current architecture checker.
+- [ ] Add automated negative tests proving domain/application independence from AWS and HTTP frameworks (a temporary forbidden dependency/import must fail the relevant check).
+- [ ] Add a reusable adapter contract-test harness; execute against each adapter when available.
+- [ ] Add Angular import-boundary lint rules.
+- [ ] Add OpenAPI lint and breaking-change detection.
+- [ ] Configure GitHub branch protection/ruleset so required checks actually block merge.
+- Evidence: compliant architecture passes; controlled forbidden dependency/import is shown to fail and then removed.
+
+### M0c – CI quality gates
+
+- [ ] Rust fmt, Clippy, unit/integration tests.
+- [ ] Angular lint, unit/component tests, Playwright E2E and visual regression.
+- [ ] Security/dependency/secret scans.
+- [ ] Terraform fmt, validate and static security scan.
+- [ ] Publish test reports, visual diffs and Terraform plan summary as PR artifacts.
+- Evidence: green required checks on a PR and inspected failure artifacts from a controlled failing test.
+
 ### M1 – AWS infrastructure
+
 - [ ] Bootstrap Terraform state S3 bucket separately.
 - [ ] Create private S3 frontend bucket.
 - [ ] Create CloudFront distribution and OAC.
@@ -94,7 +112,30 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [ ] Configure GitHub OIDC deployment role.
 - Evidence: reviewed Terraform plan, successful apply in target environment, deployed endpoint smoke test, least-privilege review and cost/resource inventory.
 
+### M1.0 – Terraform AWS foundation and delivery controls
+
+- [ ] Create a dedicated Terraform bootstrap root for remote state.
+- [ ] Provision protected S3 state bucket (versioning, encryption, public access blocked, least-privilege IAM) and enable S3 native state locking.
+- [ ] Migrate bootstrap state to remote backend and verify state recovery/versioning.
+- [ ] Create separate dev and prod Terraform roots/state keys.
+- [ ] Add reusable modules for Cognito, DynamoDB, Lambda/Function URL, frontend S3/CloudFront/OAC, IAM, logs/alarms and budgets.
+- [ ] Add GitHub OIDC roles with least privilege; separate plan and apply permissions where practical.
+- [ ] Add PR plan workflow and protected production apply workflow.
+- [ ] Pin Terraform and provider versions; commit provider lock file.
+- [ ] Add Terraform static security scanning (for example Checkov or Trivy config) and review all findings.
+- Evidence: fmt/validate/security scans, reviewed plan, successful dev apply, post-apply smoke tests, state recovery test and resource/cost inventory.
+
+### M1.1 – Application deployment pipeline
+
+- [ ] Build Rust Lambda artifact and Angular assets from the monorepo.
+- [ ] Deploy artifacts without manual console steps.
+- [ ] Record commit SHA and artifact versions.
+- [ ] Run deployed API and frontend smoke tests.
+- [ ] Gate production promotion with environment approval and a fresh Terraform plan.
+- Evidence: deployment run linked to commit, successful smoke tests and documented rollback.
+
 ### M2 – Authentication/profile
+
 - [ ] Cognito register/sign-in/password reset.
 - [ ] Rust JWT verification with JWKS caching and key rotation.
 - [ ] Derive principal from verified sub.
@@ -104,16 +145,41 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Evidence: automated auth tests, API integration output, browser screenshots for auth states, deployed smoke test.
 
 ### M3 – Personal lists/items
-- [ ] Create/list/get/rename/delete personal lists.
-- [ ] Create/update/delete/check/reorder items.
-- [ ] Item and list version transactions behind persistence ports.
-- [ ] DynamoDB adapter contract tests.
-- [ ] Pagination and input validation.
-- [ ] Angular list overview and editor.
-- [ ] Owner/member/unauthorized and concurrency tests.
+
+#### Implemented domain and application slices
+
+- [x] Personal-list domain types for list/user identifiers, validated list names and personal shopping lists.
+- [x] New personal-list aggregate starts at version 1.
+- [x] Create and list personal-list application use cases.
+- [x] Actor-scoped rename and delete use cases with validated `AggregateVersion` value object.
+- [x] Rename increments the aggregate version only when the name changes; version exhaustion is represented safely.
+- [x] Repository errors explicitly represent version exhaustion; mutation use cases preserve repository failure semantics.
+- [x] Fake-repository tests cover actor scoping, invalid inputs, successful version increments, stale no-op rename conflicts, repeated-delete NotFound semantics and repository failures.
+- [x] Port contract documents atomic expected-version checks before no-op rename detection and NotFound for repeated deletion.
+- [x] Item domain IDs and validated name, quantity, unit and note value objects.
+- [x] New items start unchecked at item version 1.
+- [x] Check/uncheck is idempotent and increments the item version only when the checked state changes.
+- [x] Application use cases add, check/uncheck and delete items through application-owned ports; mutation use cases receive actor identity explicitly.
+- [x] Add requires an expected list version; check and delete require an expected item version.
+- [x] Adapter contract requires authorization before disclosing list/item existence.
+- [x] Item mutations must atomically update the parent-list version; add enforces the 100-active-item limit and unique position.
+- [x] Version semantics are deliberately distinct: item version tracks item changes; list version tracks list-wide changes. Check returns updated item + new list version; add/delete return the new list version.
+- [x] Existing use-case tests exercise the fake repository behavior; this is not yet a reusable shared contract suite for production adapters.
+
+#### Remaining before the capability is complete
+
+- [ ] Authenticated HTTP handlers derive owner/actor ID exclusively from verified Cognito claims.
+- [ ] Concrete ID generator and persistence adapter.
+- [ ] Atomic persistence of list metadata and owner index/reference.
+- [ ] Shared repository contract tests and adapter integration tests (including stale-version no-op rename conflict, atomic version comparison, item/list version atomicity and repeated-delete NotFound).
+- [ ] Item update and reorder use cases.
+- [ ] List detail query and cursor-based pagination.
+- [ ] Angular list overview/editor and item interaction flows with reviewed visual regression.
+- [ ] API contract tests plus owner/member/unauthorized and concurrency integration tests.
 - Evidence: authorization matrix test report, transaction tests, API contract tests, Playwright E2E and visual regression report.
 
 ### M4 – Households
+
 - [ ] Create/list/get/rename household.
 - [ ] Household membership model.
 - [ ] Create/list household-owned lists.
@@ -123,6 +189,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Evidence: authorization matrix test report, transaction tests, UI screenshots/diffs and end-to-end household flow.
 
 ### M5 – Sharing
+
 - [ ] Cryptographic invitation tokens.
 - [ ] Store token hash only.
 - [ ] Invite to personal list and household.
@@ -133,6 +200,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Evidence: token security tests, race-condition/limit tests, invitation E2E flow and screenshot report.
 
 ### M6 – Synchronization/PWA
+
 - [ ] Version-based sync endpoint.
 - [ ] Poll only visible active list at 15 seconds.
 - [ ] Pause background tab; refresh on focus/reconnect.
@@ -142,6 +210,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Evidence: multi-client synchronization test, stale-write conflict test, browser visibility test and visual regression report.
 
 ### M7 – Quality/release
+
 - [ ] Rust fmt, Clippy and unit/integration tests.
 - [ ] OpenAPI lint and compatibility check.
 - [ ] Angular lint and tests.
