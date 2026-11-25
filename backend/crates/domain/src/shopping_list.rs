@@ -22,6 +22,11 @@ pub enum ListNameError {
     ContainsControlCharacters,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ListMutationError {
+    VersionExhausted,
+}
+
 impl ListName {
     pub const MAX_LENGTH: usize = 120;
 
@@ -58,6 +63,23 @@ impl ShoppingList {
         }
     }
 
+    /// Renames this aggregate and advances its version when the name changes.
+    ///
+    /// The persistence adapter must still compare the caller's expected version and
+    /// commit this state atomically with its stored representation.
+    pub fn rename(&mut self, name: ListName) -> Result<(), ListMutationError> {
+        if self.name == name {
+            return Ok(());
+        }
+
+        self.version = self
+            .version
+            .checked_add(1)
+            .ok_or(ListMutationError::VersionExhausted)?;
+        self.name = name;
+        Ok(())
+    }
+
     pub fn id(&self) -> &ListId {
         &self.id
     }
@@ -77,8 +99,16 @@ impl ShoppingList {
 
 #[cfg(test)]
 mod tests {
-    use super::{ListName, ListNameError, ShoppingList};
+    use super::{ListName, ListNameError, ListMutationError, ShoppingList};
     use crate::identifiers::{ListId, UserId};
+
+    fn list() -> ShoppingList {
+        ShoppingList::new_personal(
+            ListId::try_new("list-1").expect("valid list id"),
+            UserId::try_new("user-1").expect("valid user id"),
+            ListName::try_new("Einkauf").expect("valid list name"),
+        )
+    }
 
     #[test]
     fn list_name_is_trimmed() {
@@ -105,13 +135,43 @@ mod tests {
 
     #[test]
     fn personal_list_starts_at_version_one() {
-        let list = ShoppingList::new_personal(
-            ListId::try_new("list-1").expect("valid list id"),
-            UserId::try_new("user-1").expect("valid user id"),
-            ListName::try_new("Einkauf").expect("valid list name"),
-        );
+        let list = list();
         assert_eq!(list.version(), 1);
         assert_eq!(list.name().as_str(), "Einkauf");
         assert_eq!(list.owner_id().as_str(), "user-1");
+    }
+
+    #[test]
+    fn rename_updates_name_and_increments_aggregate_version() {
+        let mut list = list();
+
+        list.rename(ListName::try_new("  Drogerie ").unwrap())
+            .expect("rename should succeed");
+
+        assert_eq!(list.name().as_str(), "Drogerie");
+        assert_eq!(list.version(), 2);
+    }
+
+    #[test]
+    fn renaming_to_same_name_is_idempotent() {
+        let mut list = list();
+
+        list.rename(ListName::try_new("Einkauf").unwrap())
+            .expect("no-op rename should succeed");
+
+        assert_eq!(list.version(), 1);
+    }
+
+    #[test]
+    fn rename_does_not_mutate_when_version_is_exhausted() {
+        let mut list = list();
+        list.version = u64::MAX;
+
+        assert_eq!(
+            list.rename(ListName::try_new("Neu").unwrap()),
+            Err(ListMutationError::VersionExhausted)
+        );
+        assert_eq!(list.name().as_str(), "Einkauf");
+        assert_eq!(list.version(), u64::MAX);
     }
 }
