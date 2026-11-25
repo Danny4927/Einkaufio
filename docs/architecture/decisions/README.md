@@ -13,5 +13,6 @@
 | [009](009-ddd-hexagonal-and-swappable-persistence.md) | DDD, hexagonal architecture and replaceable persistence | Accepted |
 | [010](010-evidence-based-delivery-and-visual-regression.md) | Evidence-based delivery and visual regression | Accepted |
 | [011](011-monorepo-terraform-and-enforced-architecture.md) | Monorepo, Terraform IaC and enforceable architecture | Accepted |
+| [012](012-agent-workflow-and-enforced-quality-gates.md) | Agent workflow and enforced quality gates | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.

@@ -8,6 +8,18 @@
 - Every completed step must attach objective evidence: passing test/CI output, screenshots and visual diffs for UI changes, infrastructure plan/deployment output where relevant, and smoke-test results.
 - Do not mark work complete based on code inspection or an unverified claim alone.
 - Frontend UI changes require visual regression coverage or a documented reason why the change cannot be meaningfully screenshot-tested.
+- Keep this file as the single implementation-progress source of truth. Create one GitHub issue per independently deliverable work item with acceptance criteria and verification steps; link it here when scheduled.
+
+## Agent and quality foundation (ADR 012)
+
+- [x] Add concise root agent instructions and canonical documentation links.
+- [x] Add local make verify covering the current CI validation jobs, plus focused backend targets.
+- [x] Add PR evidence/security checklist.
+- [x] Add opt-in Claude Code permission and commit-hook guardrail examples.
+- [ ] Add and enforce repository Contract-Test suites for list and item repository ports with shared scenarios run against the fake and every production adapter.
+- [ ] Introduce a claims-derived verified actor at the API authentication boundary; prohibit construction from client payloads.
+- [ ] Add dependency policy and security/dependency scanners (cargo-deny, mutation testing and coverage threshold) after selecting and pinning their policy/configuration.
+- [ ] Configure GitHub ruleset/branch protection with stable CI job names as required checks.
 
 ## v1 product scope
 
@@ -21,7 +33,8 @@
 - Platform-neutral API that supports a future Android client.
 - Backend persistence isolated behind ports so DynamoDB can be replaced.
 
-### Initial product limits (configurable)
+## Initial product limits (configurable)
+
 - 10 members per household.
 - 20 lists per household.
 - 100 active items per list.
@@ -36,9 +49,9 @@ These are initial product/abuse-control limits, not permanent technical constrai
 ### M0 – Repository foundation
 - [ ] Add license and contribution guidelines.
 - [ ] Add ADR and OpenAPI validation to CI.
-- [ ] Define Rust workspace and Angular app structure.
-- [ ] Define bounded contexts, dependency rules and backend ports/adapters.
-- [ ] Add architecture boundary checks (for example cargo dependency checks).
+- [x] Define Rust workspace and Angular app structure.
+- [x] Define bounded contexts, dependency rules and backend ports/adapters.
+- [x] Add architecture boundary checks.
 - [ ] Add local development and environment configuration docs.
 - Evidence: clean CI run, architecture check output, documented project tree and reproducible local setup.
 
@@ -70,9 +83,9 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [ ] Item and list version transactions behind persistence ports.
 - [ ] DynamoDB adapter contract tests.
 - [ ] Pagination and input validation.
-- [ ] Angular personal-list overview and editor.
+- [ ] Angular list overview and editor.
 - [ ] Owner/member/unauthorized and concurrency tests.
-- Evidence: domain/application tests with fake ports, adapter integration tests, API contract tests, Playwright E2E and visual regression report.
+- Evidence: authorization matrix test report, transaction tests, API contract tests, Playwright E2E and visual regression report.
 
 ### M4 – Households
 - [ ] Create/list/get/rename household.
@@ -116,6 +129,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Evidence: green required CI checks, published test reports, approved visual diffs, deployed smoke-test report, backup/restore evidence and cost review.
 
 ## Future Android milestone (not v1)
+
 - [ ] Validate product demand and select native stack (Kotlin + Jetpack Compose candidate).
 - [ ] Cognito public-client flow with PKCE.
 - [ ] Generate/consume API models from the same OpenAPI contract.
@@ -141,79 +155,3 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - Terraform plan is reviewed and cost-affecting resources understood.
 - Deployment, smoke test and rollback are documented.
 - AWS pricing, free-tier eligibility and quotas are verified for target account.
-
-
-## Monorepo and enforcement implementation sequence
-
-The following foundation work is a prerequisite to feature implementation. Keep it in the same repository and deliver it through small reviewable PRs.
-
-### M0a – Monorepo skeleton and developer experience
-- [ ] Create the agreed top-level layout: apps/web, backend, infra/terraform, contracts/openapi, tests, docs, .github/workflows.
-- [ ] Move the existing OpenAPI contract into contracts/openapi and update references (or keep a compatibility pointer during transition).
-- [ ] Establish Rust workspace crates for domain, application, adapters and API/composition root.
-- [ ] Add Angular app under apps/web; pin Node/package manager and commit lockfiles.
-- [ ] Add root-level developer commands/documentation that invoke each toolchain reproducibly.
-- [ ] Add path-aware CI orchestration with safe dependency triggers.
-- Evidence: clean checkout setup on CI, workspace builds, Angular build, lockfile consistency and documented tree.
-
-### M0b – Architecture enforcement
-- [ ] Add Rust dependency rules that reject forbidden crate edges.
-- [ ] Add automated tests for domain/application independence from AWS and HTTP frameworks.
-- [ ] Add adapter contract-test harness, initially implemented for DynamoDB.
-- [ ] Add Angular import-boundary lint rules.
-- [ ] Add OpenAPI lint and breaking-change detection.
-- [ ] Configure GitHub branch protection/ruleset so required checks actually block merge.
-- Evidence: CI passes on compliant architecture; a temporary forbidden dependency/import is shown to fail the relevant check (negative test), then removed.
-
-### M0c – CI quality gates
-- [ ] Rust fmt, Clippy, unit/integration tests.
-- [ ] Angular lint, unit/component tests, Playwright E2E and visual regression.
-- [ ] Security/dependency/secret scans.
-- [ ] Terraform fmt, validate and static security scan.
-- [ ] Publish test reports, visual diffs and Terraform plan summary as PR artifacts.
-- Evidence: green required checks on a PR and inspected failure artifacts from a controlled failing test.
-
-### M1 – Terraform AWS foundation
-- [ ] Create a dedicated Terraform bootstrap root for remote state.
-- [ ] Provision protected S3 state bucket (versioning, encryption, public access blocked, least-privilege IAM) and enable S3 native state locking.
-- [ ] Migrate bootstrap state to remote backend and verify state recovery/versioning.
-- [ ] Create separate dev and prod Terraform roots/state keys.
-- [ ] Add reusable modules for Cognito, DynamoDB, Lambda/Function URL, frontend S3/CloudFront/OAC, IAM, logs/alarms and budgets.
-- [ ] Add GitHub OIDC roles with least privilege; separate plan and apply permissions where practical.
-- [ ] Add PR plan workflow and protected production apply workflow.
-- [ ] Pin Terraform and provider versions; commit provider lock file.
-- Evidence: fmt/validate/security scans, reviewed plan, successful dev apply, post-apply smoke tests, state recovery test and resource/cost inventory.
-
-### M1.1 – Application deployment pipeline
-- [ ] Build Rust Lambda artifact and Angular assets from the monorepo.
-- [ ] Deploy artifacts without manual console steps.
-- [ ] Record commit SHA and artifact versions.
-- [ ] Run deployed API and frontend smoke tests.
-- [ ] Gate production promotion with environment approval and a fresh Terraform plan.
-- Evidence: deployment run linked to commit, successful smoke tests and documented rollback.
-
-
-## Current implementation progress
-
-### Personal-list vertical slice (in progress)
-
-Implemented in the backend workspace:
-- [x] Pure domain types for list/user identifiers, validated list names and personal shopping lists.
-- [x] Initial aggregate version is 1.
-- [x] Application use cases for creating and listing personal lists.
-- [x] Actor-scoped rename and delete use cases with a validated AggregateVersion value object.
-- [x] Domain rename behavior increments the aggregate version only when the name changes and safely reports version exhaustion.
-- [x] Repository errors explicitly represent version exhaustion; mutation use cases preserve repository failure semantics without duplicated mapping.
-- [x] Fake-repository tests for actor scoping, invalid inputs, successful version increments, stale no-op rename conflicts, repeated-delete NotFound semantics and repository failures.
-- [x] Port contracts document atomic expected-version checks before no-op rename detection and NotFound for repeated deletion.
-
-Still required before the personal-list capability is complete:
-- [ ] Authenticated HTTP handler that derives owner ID exclusively from verified Cognito claims.
-- [ ] Concrete ID generator and persistence adapter.
-- [ ] Atomic persistence of list metadata and owner index/reference.
-- [ ] API contract tests and adapter contract tests (including stale-version no-op rename conflict, atomic version comparison and repeated-delete NotFound).
-- [ ] List detail query and cursor-based pagination.
-- [ ] Angular list overview/create/edit flow and reviewed visual regression.
-- [ ] Authorization and concurrency integration tests.
-
-The application use cases are executable and tested with fake ports, but are not yet wired to HTTP or deployable persistence.
