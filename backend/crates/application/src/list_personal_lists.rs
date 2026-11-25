@@ -54,7 +54,7 @@ mod tests {
     use einkaufio_domain::{ListId, ListName, ShoppingList, UserId};
 
     use super::{ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery};
-    use crate::ports::{ListIdGenerator, RepositoryError, ShoppingListRepository};
+    use crate::ports::{RepositoryError, ShoppingListRepository};
 
     #[derive(Default)]
     struct FakeRepository {
