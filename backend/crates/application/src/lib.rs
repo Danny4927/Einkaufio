@@ -11,9 +11,7 @@ pub mod shopping_items;
 pub use create_personal_list::{
     CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError,
 };
-pub use list_personal_lists::{
-    ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery,
-};
+pub use list_personal_lists::{ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery};
 pub use ports::{
     ItemIdGenerator, ListIdGenerator, RepositoryError, ShoppingItemRepository,
     ShoppingListRepository,
