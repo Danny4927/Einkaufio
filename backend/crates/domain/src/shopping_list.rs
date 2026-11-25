@@ -45,6 +45,9 @@ impl ListName {
 }
 
 impl ShoppingList {
+    /// Maximum number of active items in one shopping list.
+    pub const MAX_ACTIVE_ITEMS: usize = 100;
+
     /// Creates a personal list at its initial aggregate version.
     pub fn new_personal(id: ListId, owner_id: UserId, name: ListName) -> Self {
         Self {
