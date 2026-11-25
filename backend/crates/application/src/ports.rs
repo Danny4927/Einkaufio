@@ -23,10 +23,14 @@ pub trait ShoppingListRepository {
     fn create_personal(&self, list: ShoppingList) -> Result<(), RepositoryError>;
 
     /// Returns only personal lists owned by the authenticated user.
+    ///
+    /// The fail-closed default keeps existing adapters safe until they implement the query.
     fn list_personal_for_owner(
         &self,
-        owner_id: &UserId,
-    ) -> Result<Vec<ShoppingList>, RepositoryError>;
+        _owner_id: &UserId,
+    ) -> Result<Vec<ShoppingList>, RepositoryError> {
+        Err(RepositoryError::Unavailable)
+    }
 }
 
 /// Mutates items owned by a list.
