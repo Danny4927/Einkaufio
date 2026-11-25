@@ -162,7 +162,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [x] Application use cases add, check/uncheck and delete items through application-owned ports; mutation use cases receive actor identity explicitly.
 - [x] Add requires an expected list version; check and delete require an expected item version.
 - [x] Adapter contract requires authorization before disclosing list/item existence.
-- [x] Item mutations must atomically update the parent-list version; add enforces the 100-active-item limit and unique position.
+- [x] Port contract specifies atomic parent-list version updates, the 100-active-item limit and unique position assignment; these guarantees are not yet implemented by a concrete persistence adapter.
 - [x] Version semantics are deliberately distinct: item version tracks item changes; list version tracks list-wide changes. Check returns updated item + new list version; add/delete return the new list version.
 - [x] Existing use-case tests exercise the fake repository behavior; this is not yet a reusable shared contract suite for production adapters.
 
