@@ -204,14 +204,15 @@ mod tests {
     use super::*;
     use crate::ports::RepositoryError;
 
+    type CheckedCall = (UserId, String, ItemId, u64, bool);
+
     #[derive(Default)]
     struct FakeRepository {
         added: RefCell<Vec<(UserId, String, u64, ShoppingItem)>>,
-        checked: RefCell<Vec<(UserId, String, ItemId, u64, bool)>>,
+        checked: RefCell<Vec<CheckedCall>>,
         deleted: RefCell<Vec<(UserId, String, ItemId, u64)>>,
         failure: Option<RepositoryError>,
         list_version_after_mutation: u64,
-        item_version_after_mutation: u64,
     }
 
     impl ShoppingItemRepository for FakeRepository {
