@@ -1,10 +1,12 @@
 //! Shopping-list aggregate and its invariants.
 
-use crate::identifiers::{ItemId, ListId, UserId};
+use crate::identifiers::{ListId, UserId};
 
+/// A validated shopping-list name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListName(String);
 
+/// A personal shopping list owned by one user.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShoppingList {
     id: ListId,
@@ -18,12 +20,6 @@ pub enum ListNameError {
     Empty,
     TooLong,
     ContainsControlCharacters,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ShoppingListMutationError {
-    ItemLimitReached,
-    ItemNotFound,
 }
 
 impl ListName {
@@ -49,8 +45,10 @@ impl ListName {
 }
 
 impl ShoppingList {
+    /// Maximum number of active items in one shopping list.
     pub const MAX_ACTIVE_ITEMS: usize = 100;
 
+    /// Creates a personal list at its initial aggregate version.
     pub fn new_personal(id: ListId, owner_id: UserId, name: ListName) -> Self {
         Self {
             id,
@@ -75,36 +73,12 @@ impl ShoppingList {
     pub fn version(&self) -> u64 {
         self.version
     }
-
-    /// A committed item mutation advances the aggregate version once.
-    pub fn record_item_mutation(&mut self) {
-        self.version += 1;
-    }
-
-    pub fn ensure_item_capacity(active_item_count: usize) -> Result<(), ShoppingListMutationError> {
-        if active_item_count >= Self::MAX_ACTIVE_ITEMS {
-            Err(ShoppingListMutationError::ItemLimitReached)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn ensure_item_exists(
-        item_id: &ItemId,
-        existing_item_ids: &[ItemId],
-    ) -> Result<(), ShoppingListMutationError> {
-        if existing_item_ids.iter().any(|id| id == item_id) {
-            Ok(())
-        } else {
-            Err(ShoppingListMutationError::ItemNotFound)
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ListName, ListNameError, ShoppingList, ShoppingListMutationError};
-    use crate::identifiers::{ItemId, ListId, UserId};
+    use super::{ListName, ListNameError, ShoppingList};
+    use crate::identifiers::{ListId, UserId};
 
     #[test]
     fn list_name_is_trimmed() {
@@ -115,10 +89,7 @@ mod tests {
     #[test]
     fn list_name_rejects_empty_and_overlong_values() {
         assert_eq!(ListName::try_new("  "), Err(ListNameError::Empty));
-        assert_eq!(
-            ListName::try_new("x".repeat(121)),
-            Err(ListNameError::TooLong)
-        );
+        assert_eq!(ListName::try_new("x".repeat(121)), Err(ListNameError::TooLong));
     }
 
     #[test]
@@ -132,42 +103,12 @@ mod tests {
     #[test]
     fn personal_list_starts_at_version_one() {
         let list = ShoppingList::new_personal(
-            ListId::try_new("list-1").unwrap(),
-            UserId::try_new("user-1").unwrap(),
-            ListName::try_new("Einkauf").unwrap(),
+            ListId::try_new("list-1").expect("valid list id"),
+            UserId::try_new("user-1").expect("valid user id"),
+            ListName::try_new("Einkauf").expect("valid list name"),
         );
         assert_eq!(list.version(), 1);
         assert_eq!(list.name().as_str(), "Einkauf");
         assert_eq!(list.owner_id().as_str(), "user-1");
-    }
-
-    #[test]
-    fn item_mutation_advances_list_version() {
-        let mut list = ShoppingList::new_personal(
-            ListId::try_new("list-1").unwrap(),
-            UserId::try_new("user-1").unwrap(),
-            ListName::try_new("Einkauf").unwrap(),
-        );
-        list.record_item_mutation();
-        assert_eq!(list.version(), 2);
-    }
-
-    #[test]
-    fn enforces_initial_active_item_limit() {
-        assert!(ShoppingList::ensure_item_capacity(99).is_ok());
-        assert_eq!(
-            ShoppingList::ensure_item_capacity(100),
-            Err(ShoppingListMutationError::ItemLimitReached)
-        );
-    }
-
-    #[test]
-    fn rejects_missing_item_ids() {
-        let id = ItemId::try_new("item-1").unwrap();
-        assert_eq!(
-            ShoppingList::ensure_item_exists(&id, &[]),
-            Err(ShoppingListMutationError::ItemNotFound)
-        );
-        assert!(ShoppingList::ensure_item_exists(&id, std::slice::from_ref(&id)).is_ok());
     }
 }
