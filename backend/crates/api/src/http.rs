@@ -37,7 +37,10 @@ impl ApiState {
 
 pub fn router(state: ApiState) -> Router {
     let protected = Router::new()
-        .route("/lists", get(list_personal_lists).post(create_personal_list))
+        .route(
+            "/lists",
+            get(list_personal_lists).post(create_personal_list),
+        )
         .route_layer(middleware::from_fn(require_verified_actor));
 
     Router::new()
@@ -55,10 +58,7 @@ struct HealthResponse {
     status: &'static str,
 }
 
-async fn require_verified_actor(
-    _request: axum::extract::Request,
-    _next: Next,
-) -> Response {
+async fn require_verified_actor(_request: axum::extract::Request, _next: Next) -> Response {
     // This placeholder is intentionally not configurable to accept an arbitrary user ID.
     // Replace it only together with cryptographic Cognito token verification and a verified
     // principal extractor.
@@ -148,7 +148,6 @@ enum ApiError {
     AuthenticationUnavailable,
     InvalidInput,
     Conflict,
-    NotFound,
     Unavailable,
     Internal,
 }
@@ -195,11 +194,6 @@ impl IntoResponse for ApiError {
                 "conflict",
                 "The resource conflicts with the current state",
             ),
-            Self::NotFound => (
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "The resource was not found",
-            ),
             Self::Unavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service_unavailable",
@@ -225,13 +219,18 @@ mod tests {
     use tower::ServiceExt;
 
     struct NoLists;
+
     impl ShoppingListRepository for NoLists {
-        fn create_personal(&self, _list: ShoppingList) -> Result<(), einkaufio_application::RepositoryError> {
+        fn create_personal(
+            &self,
+            _list: ShoppingList,
+        ) -> Result<(), einkaufio_application::RepositoryError> {
             Err(einkaufio_application::RepositoryError::Unavailable)
         }
     }
 
     struct NoIds;
+
     impl ListIdGenerator for NoIds {
         fn generate(&self) -> String {
             "unused".to_owned()
@@ -242,7 +241,12 @@ mod tests {
     async fn health_is_public() {
         let app = router(ApiState::new(Arc::new(NoLists), Arc::new(NoIds)));
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -255,11 +259,22 @@ mod tests {
         let app = router(ApiState::new(Arc::new(NoLists), Arc::new(NoIds)));
         for (method, uri, body) in [
             (Method::GET, "/api/lists", Body::empty()),
-            (Method::POST, "/api/lists", Body::from(r#"{"name":"Einkauf","ownerId":"attacker"}"#)),
+            (
+                Method::POST,
+                "/api/lists",
+                Body::from(r#"{"name":"Einkauf","ownerId":"attacker"}"#),
+            ),
         ] {
             let response = app
                 .clone()
-                .oneshot(Request::builder().method(method).uri(uri).header("content-type", "application/json").body(body).unwrap())
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(body)
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
