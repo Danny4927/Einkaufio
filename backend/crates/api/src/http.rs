@@ -41,6 +41,16 @@ impl ApiState {
         self.verifier = Some(Arc::new(verifier));
         self
     }
+
+    /// Build an authenticated API state from trusted runtime environment variables.
+    pub fn from_cognito_env(
+        lists: Arc<dyn ShoppingListRepository + Send + Sync>,
+        ids: Arc<dyn ListIdGenerator + Send + Sync>,
+    ) -> Result<Self, AuthError> {
+        let config = crate::auth::CognitoConfig::from_env()?;
+        let verifier = CognitoTokenVerifier::new(config)?;
+        Ok(Self::new(lists, ids).with_authenticator(verifier))
+    }
 }
 
 pub fn router(state: ApiState) -> Router {
