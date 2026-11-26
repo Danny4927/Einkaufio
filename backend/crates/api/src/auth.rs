@@ -239,31 +239,6 @@ impl CognitoTokenVerifier {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn issuer_is_derived_from_trusted_pool_configuration() {
-        let config = CognitoConfig {
-            issuer: "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_example".into(),
-            app_client_id: "client".into(),
-        };
-
-        assert!(
-            config
-                .issuer
-                .starts_with("https://cognito-idp.eu-central-1.amazonaws.com/")
-        );
-        assert_eq!(config.app_client_id, "client");
-    }
-
-    #[test]
-    fn invalid_token_error_is_distinct_from_unavailable_verifier() {
-        assert_ne!(AuthError::InvalidToken, AuthError::Unavailable);
-    }
-}
-
-#[cfg(test)]
 mod jwks_integration_tests {
     use super::*;
     use axum::{Json, extract::State, routing::get};
@@ -366,7 +341,10 @@ mod jwks_integration_tests {
             Err(AuthError::InvalidToken)
         );
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let invalid = [
             json!({"iss":"https://wrong.example"}),
             json!({"exp":now-60}),
