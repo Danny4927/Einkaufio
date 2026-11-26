@@ -9,8 +9,7 @@ use std::collections::HashMap;
 
 use einkaufio_application::{RepositoryError, ShoppingItemRepository, ShoppingListRepository};
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ListId, ListName,
-    ShoppingItem, ShoppingList, UserId,
+    AggregateVersion, ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId,
 };
 
 #[derive(Default)]
@@ -30,7 +29,6 @@ impl InMemoryRepository {
         Self::default()
     }
 
-
     fn authorized_list<'a>(
         state: &'a mut State,
         actor_id: &UserId,
@@ -41,8 +39,6 @@ impl InMemoryRepository {
             _ => Err(RepositoryError::NotFound),
         }
     }
-
-
 }
 
 impl ShoppingListRepository for InMemoryRepository {
@@ -127,15 +123,23 @@ impl ShoppingItemRepository for InMemoryRepository {
         if state.items.contains_key(&key) {
             return Err(RepositoryError::AlreadyExists);
         }
-        let active_count = state.items.keys().filter(|(candidate, _)| candidate == list_id).count();
+        let active_count = state
+            .items
+            .keys()
+            .filter(|(candidate, _)| candidate == list_id)
+            .count();
         if active_count >= ShoppingList::MAX_ACTIVE_ITEMS {
             return Err(RepositoryError::ItemLimitReached);
         }
 
         let position = *state.next_positions.get(list_id).unwrap_or(&0);
         let assigned = item.with_position(position);
-        let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
-        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        let list = state
+            .lists
+            .get_mut(list_id)
+            .ok_or(RepositoryError::NotFound)?;
+        list.record_item_mutation()
+            .map_err(|_| RepositoryError::VersionExhausted)?;
         let next_version = list.aggregate_version();
         state.items.insert(key, assigned);
         state.next_positions.insert(list_id.clone(), position + 1);
@@ -152,7 +156,9 @@ impl ShoppingItemRepository for InMemoryRepository {
         if list.owner_id() != actor_id {
             return Err(RepositoryError::NotFound);
         }
-        let mut items: Vec<_> = state.items.iter()
+        let mut items: Vec<_> = state
+            .items
+            .iter()
             .filter(|((candidate, _), _)| candidate == list_id)
             .map(|(_, item)| item.clone())
             .collect();
@@ -178,10 +184,16 @@ impl ShoppingItemRepository for InMemoryRepository {
         }
         let mut updated = stored.clone();
         if updated.set_checked(checked) {
-            let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
-            list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+            let list = state
+                .lists
+                .get_mut(list_id)
+                .ok_or(RepositoryError::NotFound)?;
+            list.record_item_mutation()
+                .map_err(|_| RepositoryError::VersionExhausted)?;
         }
-        let list_version = state.lists.get(list_id)
+        let list_version = state
+            .lists
+            .get(list_id)
             .ok_or(RepositoryError::NotFound)?
             .aggregate_version();
         state.items.insert(key, updated.clone());
@@ -203,8 +215,12 @@ impl ShoppingItemRepository for InMemoryRepository {
         if stored.version() != expected_item_version {
             return Err(RepositoryError::Conflict);
         }
-        let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
-        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        let list = state
+            .lists
+            .get_mut(list_id)
+            .ok_or(RepositoryError::NotFound)?;
+        list.record_item_mutation()
+            .map_err(|_| RepositoryError::VersionExhausted)?;
         let next_version = list.aggregate_version();
         state.items.remove(&key);
         Ok(next_version)
