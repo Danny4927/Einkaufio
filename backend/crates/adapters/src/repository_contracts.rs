@@ -110,11 +110,11 @@ pub fn run_shopping_item_contract(
 ) {
     let owner = user("contract-item-owner");
     let other = user("contract-item-other");
-    let list = list("contract-item-list", "contract-item-owner", "Items");
+    let item_list = list("contract-item-list", "contract-item-owner", "Items");
     lists.create_personal(list.clone()).expect("provision contract list");
 
     assert_eq!(
-        items.add_item(&other, list.id(), version(1), item("unauthorized-item", "contract-item-owner", 0)),
+        items.add_item(&other, item_list.id(), version(1), item("unauthorized-item", "contract-item-owner", 0)),
         Err(RepositoryError::NotFound)
     );
     assert_eq!(
@@ -123,52 +123,52 @@ pub fn run_shopping_item_contract(
     );
 
     let list_version = items.add_item(
-        &owner, list.id(), version(1), item("contract-item-1", "contract-item-owner", 999)
+        &owner, item_list.id(), version(1), item("contract-item-1", "contract-item-owner", 999)
     ).expect("first item");
     assert_eq!(list_version, version(2));
     assert_eq!(
-        items.add_item(&owner, list.id(), version(2), item("contract-item-1", "contract-item-owner", 0)),
+        items.add_item(&owner, item_list.id(), version(2), item("contract-item-1", "contract-item-owner", 0)),
         Err(RepositoryError::AlreadyExists)
     );
     assert_eq!(
-        items.add_item(&owner, list.id(), version(1), item("stale-item", "contract-item-owner", 0)),
+        items.add_item(&owner, item_list.id(), version(1), item("stale-item", "contract-item-owner", 0)),
         Err(RepositoryError::Conflict)
     );
 
     let item_id = ItemId::try_new("contract-item-1").unwrap();
     assert_eq!(
-        items.set_item_checked(&other, list.id(), &item_id, 1, true),
+        items.set_item_checked(&other, item_list.id(), &item_id, 1, true),
         Err(RepositoryError::NotFound)
     );
     assert_eq!(
-        items.set_item_checked(&owner, list.id(), &item_id, 99, true),
+        items.set_item_checked(&owner, item_list.id(), &item_id, 99, true),
         Err(RepositoryError::Conflict)
     );
-    let (checked, list_version) = items.set_item_checked(&owner, list.id(), &item_id, 1, true).unwrap();
+    let (checked, list_version) = items.set_item_checked(&owner, item_list.id(), &item_id, 1, true).unwrap();
     assert!(checked.checked());
     assert_eq!(checked.version(), 2);
     assert_eq!(list_version, version(3));
 
-    let (unchanged, list_version) = items.set_item_checked(&owner, list.id(), &item_id, 2, true).unwrap();
+    let (unchanged, list_version) = items.set_item_checked(&owner, item_list.id(), &item_id, 2, true).unwrap();
     assert_eq!(unchanged.version(), 2);
     assert_eq!(list_version, version(3));
 
-    let (unchecked, list_version) = items.set_item_checked(&owner, list.id(), &item_id, 2, false).unwrap();
+    let (unchecked, list_version) = items.set_item_checked(&owner, item_list.id(), &item_id, 2, false).unwrap();
     assert!(!unchecked.checked());
     assert_eq!(unchecked.version(), 3);
     assert_eq!(list_version, version(4));
 
     assert_eq!(
-        items.delete_item(&owner, list.id(), &item_id, 2),
+        items.delete_item(&owner, item_list.id(), &item_id, 2),
         Err(RepositoryError::Conflict)
     );
     assert_eq!(
-        items.delete_item(&other, list.id(), &item_id, 3),
+        items.delete_item(&other, item_list.id(), &item_id, 3),
         Err(RepositoryError::NotFound)
     );
-    assert_eq!(items.delete_item(&owner, list.id(), &item_id, 3), Ok(version(5)));
+    assert_eq!(items.delete_item(&owner, item_list.id(), &item_id, 3), Ok(version(5)));
     assert_eq!(
-        items.delete_item(&owner, list.id(), &item_id, 3),
+        items.delete_item(&owner, item_list.id(), &item_id, 3),
         Err(RepositoryError::NotFound)
     );
 
@@ -179,7 +179,7 @@ pub fn run_shopping_item_contract(
         let expected = version(index as u64 + 1);
         let next = items.add_item(
             &owner,
-            capacity_list.id(),
+            capacity_item_list.id(),
             expected,
             item(&format!("capacity-item-{index}"), "contract-item-owner", 42),
         ).unwrap();
@@ -188,18 +188,18 @@ pub fn run_shopping_item_contract(
     assert_eq!(
         items.add_item(
             &owner,
-            capacity_list.id(),
+            capacity_item_list.id(),
             version(101),
             item("capacity-overflow", "contract-item-owner", 0)
         ),
         Err(RepositoryError::ItemLimitReached)
     );
-    let stored = items.list_items(&owner, capacity_list.id()).unwrap();
+    let stored = items.list_items(&owner, capacity_item_list.id()).unwrap();
     assert_eq!(stored.len(), ShoppingList::MAX_ACTIVE_ITEMS);
     let positions: Vec<_> = stored.iter().map(ShoppingItem::position).collect();
     assert_eq!(positions, (0..ShoppingList::MAX_ACTIVE_ITEMS as u32).collect::<Vec<_>>());
     assert_eq!(
-        items.list_items(&other, capacity_list.id()),
+        items.list_items(&other, capacity_item_list.id()),
         Err(RepositoryError::NotFound)
     );
 }
