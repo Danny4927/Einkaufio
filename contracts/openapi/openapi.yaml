@@ -80,7 +80,6 @@ paths:
               schema: { $ref: '#/components/schemas/ListPage' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Lists]
       summary: Create a personal list
