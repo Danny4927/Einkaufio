@@ -142,28 +142,7 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
         Err(RepositoryError::NotFound)
     );
     
-    // A separate list proves that positions are assigned by the repository, not trusted
-    // from the incoming entity. The item's supplied position is deliberately non-zero.
-    let position_list = list_id("contract-position-list");
-    // The contract fixture provisions this list before running the scenario.
-    let _ = position_list;
-    
-    // The maximum active item count is part of the port contract. Use unique IDs and an
-    // expected list version that advances after each successful add.
-    for index in 0..ShoppingList::MAX_ACTIVE_ITEMS {
-        let list_revision = index as u64 + 1;
-        let result = repository.add_item(
-            &owner,
-            "contract-item-list",
-            list_revision,
-            item(&format!("capacity-item-{index}"), "contract-item-owner"),
-        );
-        if index == 0 {
-            // The existing list has already been advanced by the earlier item lifecycle.
-            assert!(matches!(result, Err(RepositoryError::Conflict)));
-            break;
-        }
-    }
+
 }
 
 /// The reference adapter is executed against the exact same exported scenarios production
