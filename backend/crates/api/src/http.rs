@@ -199,8 +199,9 @@ impl From<CreatePersonalListError> for ApiError {
             CreatePersonalListError::InvalidName(_) => Self::InvalidInput,
             // Owner identity and generated list IDs are server-controlled. Failures here
             // indicate an authentication/infrastructure invariant, not a client conflict.
-            CreatePersonalListError::InvalidOwner(_)
-            | CreatePersonalListError::AlreadyExists => Self::Internal,
+            CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => {
+                Self::Internal
+            }
             CreatePersonalListError::PersistenceUnavailable => Self::Unavailable,
             CreatePersonalListError::InvalidGeneratedId(_)
             | CreatePersonalListError::RepositoryInvariantViolation => Self::Internal,
@@ -270,7 +271,6 @@ mod tests {
             self.lists.lock().unwrap().push(list);
             Ok(())
         }
-
     }
 
     struct TestIds;
@@ -282,18 +282,14 @@ mod tests {
     }
 
     fn test_router() -> Router {
-        let protected =
-            protected_routes().route_layer(middleware::from_fn(inject_test_actor));
+        let protected = protected_routes().route_layer(middleware::from_fn(inject_test_actor));
         build_router(
             ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds)),
             protected,
         )
     }
 
-    async fn inject_test_actor(
-        mut request: axum::extract::Request,
-        next: Next,
-    ) -> Response {
+    async fn inject_test_actor(mut request: axum::extract::Request, next: Next) -> Response {
         request.extensions_mut().insert(VerifiedActor {
             owner_id: "verified-test-owner".to_owned(),
         });
@@ -368,12 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_list_returns_created_for_verified_actor() {
-        let response = send_json(
-            test_router(),
-            Method::POST,
-            r#"{"name":"Wocheneinkauf"}"#,
-        )
-        .await;
+        let response = send_json(test_router(), Method::POST, r#"{"name":"Wocheneinkauf"}"#).await;
         assert_eq!(response.status(), StatusCode::CREATED);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
