@@ -84,7 +84,7 @@ impl VerifiedActor {
 }
 
 impl FromRequestParts<ApiState> for VerifiedActor {
-    type Rejection = ApiError;
+    type Rejection = StatusCode;
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -94,7 +94,7 @@ impl FromRequestParts<ApiState> for VerifiedActor {
             .extensions
             .get::<Self>()
             .cloned()
-            .ok_or(ApiError::AuthenticationUnavailable)
+            .ok_or(StatusCode::SERVICE_UNAVAILABLE)
     }
 }
 
