@@ -28,3 +28,5 @@ pub use shopping_items::{
     AddShoppingItem, AddShoppingItemCommand, DeleteShoppingItem, DeleteShoppingItemCommand,
     SetShoppingItemChecked, SetShoppingItemCheckedCommand, ShoppingItemError,
 };
+
+pub use einkaufio_domain::ShoppingList;

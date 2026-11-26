@@ -2,3 +2,5 @@
 //!
 //! Axum handlers, Lambda entry points, transport DTO mapping and dependency
 //! wiring belong here. Business rules stay in domain/application.
+
+pub mod http;
