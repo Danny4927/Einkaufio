@@ -67,7 +67,7 @@ struct HealthResponse {
 
 /// Identity that can only be created inside the API crate after authentication verification.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VerifiedActor {
+pub(crate) struct VerifiedActor {
     owner_id: String,
 }
 
