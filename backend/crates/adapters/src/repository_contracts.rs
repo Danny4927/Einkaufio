@@ -221,7 +221,6 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
         ),
         Err(RepositoryError::NotFound)
     );
-
 }
 
 /// The reference adapter is executed against the exact same exported scenarios production
