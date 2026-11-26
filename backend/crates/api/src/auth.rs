@@ -253,3 +253,135 @@ mod tests {
         assert_ne!(AuthError::InvalidToken, AuthError::Unavailable);
     }
 }
+
+#[cfg(test)]
+mod jwks_integration_tests {
+    use super::*;
+    use axum::{Json, extract::State, routing::get};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use jsonwebtoken::{EncodingKey, Header, encode};
+    use rand::rngs::OsRng;
+    use rsa::{RsaPrivateKey, pkcs8::{EncodePrivateKey, LineEnding}, traits::PublicKeyParts};
+    use serde_json::{Value, json};
+    use tokio::{net::TcpListener, sync::RwLock, task::JoinHandle};
+
+    struct Fixture {
+        verifier: CognitoTokenVerifier,
+        document: Arc<RwLock<Value>>,
+        private_pem: String,
+        server: JoinHandle<()>,
+    }
+
+    async fn serve_jwks(State(doc): State<Arc<RwLock<Value>>>) -> Json<Value> {
+        Json(doc.read().await.clone())
+    }
+
+    async fn fixture() -> Fixture {
+        let private = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
+        let n = URL_SAFE_NO_PAD.encode(private.n().to_bytes_be());
+        let e = URL_SAFE_NO_PAD.encode(private.e().to_bytes_be());
+        let document = Arc::new(RwLock::new(json!({"keys":[{
+            "kid":"key-1","kty":"RSA","alg":"RS256","use":"sig","n":n,"e":e
+        }]})));
+        let app = axum::Router::new()
+            .route("/.well-known/jwks.json", get(serve_jwks))
+            .with_state(document.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let config = CognitoConfig {
+            issuer: "https://issuer.example.test/pool".into(),
+            app_client_id: "expected-client".into(),
+        };
+        let verifier = CognitoTokenVerifier::new_with_jwks_url(
+            config, format!("http://{address}/.well-known/jwks.json")
+        ).unwrap();
+        Fixture { verifier, document, private_pem, server }
+    }
+
+    fn claims(overrides: Value) -> Value {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let mut value = json!({
+            "sub":"user-123","iss":"https://issuer.example.test/pool",
+            "exp":now+300,"iat":now,"token_use":"access","client_id":"expected-client"
+        });
+        for (key, val) in overrides.as_object().unwrap() {
+            value[key] = val.clone();
+        }
+        value
+    }
+
+    fn signed_token(pem: &str, kid: &str, claims: Value) -> String {
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(kid.into());
+        encode(&header, &claims, &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn accepts_a_valid_signed_access_token() {
+        let f = fixture().await;
+        let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        assert_eq!(f.verifier.verify(&token).await.unwrap().subject, "user-123");
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_signature_and_invalid_claims() {
+        let f = fixture().await;
+        let valid = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        let mut parts = valid.split('.').map(str::to_owned).collect::<Vec<_>>();
+        let replacement = if parts[2].starts_with('A') { "B" } else { "A" };
+        parts[2].replace_range(..1, replacement);
+        assert_eq!(f.verifier.verify(&parts.join(".")).await, Err(AuthError::InvalidToken));
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let invalid = [
+            json!({"iss":"https://wrong.example"}),
+            json!({"exp":now-60}),
+            json!({"nbf":now+600}),
+            json!({"token_use":"id"}),
+            json!({"client_id":"wrong-client"}),
+            json!({"sub":""}),
+        ];
+        for overrides in invalid {
+            let token = signed_token(&f.private_pem, "key-1", claims(overrides));
+            assert_eq!(f.verifier.verify(&token).await, Err(AuthError::InvalidToken));
+        }
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn refreshes_jwks_for_a_rotated_signing_key_id() {
+        let f = fixture().await;
+        let first = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        assert!(f.verifier.verify(&first).await.is_ok());
+
+        {
+            let mut cache = f.verifier.cache.write().await;
+            cache.last_refresh_at = None;
+        }
+        let mut document = f.document.write().await;
+        document["keys"][0]["kid"] = json!("key-2");
+        drop(document);
+
+        let rotated = signed_token(&f.private_pem, "key-2", claims(json!({})));
+        assert_eq!(f.verifier.verify(&rotated).await.unwrap().subject, "user-123");
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn jwks_outage_fails_closed() {
+        let config = CognitoConfig {
+            issuer: "https://issuer.example.test/pool".into(),
+            app_client_id: "expected-client".into(),
+        };
+        let verifier = CognitoTokenVerifier::new_with_jwks_url(
+            config, "http://127.0.0.1:1/.well-known/jwks.json".into()
+        ).unwrap();
+        let f = fixture().await;
+        let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        assert_eq!(verifier.verify(&token).await, Err(AuthError::Unavailable));
+        f.server.abort();
+    }
+}
