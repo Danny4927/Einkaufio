@@ -359,6 +359,7 @@ mod jwks_integration_tests {
             json!({"iss":"https://wrong.example"}),
             json!({"exp":now-60}),
             json!({"nbf":now+600}),
+            json!({"iat":now+600}),
             json!({"token_use":"id"}),
             json!({"client_id":"wrong-client"}),
             json!({"sub":""}),
