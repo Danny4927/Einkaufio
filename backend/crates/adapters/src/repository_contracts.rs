@@ -141,7 +141,7 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
         ),
         Err(RepositoryError::NotFound)
     );
-    
+
 
 }
 
