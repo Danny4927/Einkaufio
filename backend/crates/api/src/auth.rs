@@ -20,10 +20,8 @@ impl CognitoConfig {
     /// Derive the issuer only from trusted deployment configuration.
     pub fn from_env() -> Result<Self, AuthError> {
         let region = std::env::var("AWS_REGION").map_err(|_| AuthError::Unavailable)?;
-        let pool =
-            std::env::var("COGNITO_USER_POOL_ID").map_err(|_| AuthError::Unavailable)?;
-        let client =
-            std::env::var("COGNITO_APP_CLIENT_ID").map_err(|_| AuthError::Unavailable)?;
+        let pool = std::env::var("COGNITO_USER_POOL_ID").map_err(|_| AuthError::Unavailable)?;
+        let client = std::env::var("COGNITO_APP_CLIENT_ID").map_err(|_| AuthError::Unavailable)?;
 
         if region.trim().is_empty()
             || pool.trim().is_empty()
@@ -185,7 +183,9 @@ impl CognitoTokenVerifier {
         if claims.iss != self.config.issuer
             || claims.exp <= now
             || claims.iat > now.saturating_add(30)
-            || claims.nbf.is_some_and(|value| value > now.saturating_add(30))
+            || claims
+                .nbf
+                .is_some_and(|value| value > now.saturating_add(30))
             || claims.token_use != "access"
             || claims.client_id != self.config.app_client_id
             || claims.sub.trim().is_empty()
