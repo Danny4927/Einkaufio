@@ -9,6 +9,8 @@ axum = "0.8"
 einkaufio-adapters = { path = "../adapters" }
 einkaufio-application = { path = "../application" }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
