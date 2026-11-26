@@ -1,8 +1,8 @@
 //! Application use cases for shopping-list item mutations.
 
 use einkaufio_domain::{
-    ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ListId, ShoppingItem,
-    UserId,
+    AggregateVersion, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ListId,
+    ShoppingItem, UserId,
 };
 
 use crate::ports::{ItemIdGenerator, RepositoryError, ShoppingItemRepository};
@@ -86,12 +86,13 @@ impl<'a> AddShoppingItem<'a> {
             .repository
             .add_item(
                 &actor,
-                list_id.as_str(),
-                command.expected_list_version,
+                &list_id,
+                AggregateVersion::try_new(command.expected_list_version)
+                    .map_err(|_| ShoppingItemError::InvalidExpectedVersion)?,
                 item.clone(),
             )
             .map_err(map_repository_error)?;
-        Ok((item, next_list_version))
+        Ok((item, next_list_version.as_u64()))
     }
 }
 
@@ -131,11 +132,12 @@ impl<'a> SetShoppingItemChecked<'a> {
         self.repository
             .set_item_checked(
                 &actor,
-                list_id.as_str(),
+                &list_id,
                 &item_id,
                 command.expected_item_version,
                 command.checked,
             )
+            .map(|(item, version)| (item, version.as_u64()))
             .map_err(map_repository_error)
     }
 }
@@ -170,12 +172,8 @@ impl<'a> DeleteShoppingItem<'a> {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
         self.repository
-            .delete_item(
-                &actor,
-                list_id.as_str(),
-                &item_id,
-                command.expected_item_version,
-            )
+            .delete_item(&actor, &list_id, &item_id, command.expected_item_version)
+            .map(|version| version.as_u64())
             .map_err(map_repository_error)
     }
 }
@@ -221,36 +219,40 @@ mod tests {
         fn add_item(
             &self,
             actor_id: &UserId,
-            list_id: &str,
-            expected_version: u64,
+            list_id: &ListId,
+            expected_version: AggregateVersion,
             item: ShoppingItem,
-        ) -> Result<u64, RepositoryError> {
+        ) -> Result<AggregateVersion, RepositoryError> {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
             self.added.borrow_mut().push((
                 actor_id.clone(),
-                list_id.to_owned(),
-                expected_version,
+                list_id.as_str().to_owned(),
+                expected_version.as_u64(),
                 item,
             ));
-            Ok(self.list_version_after_mutation.max(expected_version + 1))
+            Ok(AggregateVersion::try_new(
+                self.list_version_after_mutation
+                    .max(expected_version.as_u64() + 1),
+            )
+            .unwrap())
         }
 
         fn set_item_checked(
             &self,
             actor_id: &UserId,
-            list_id: &str,
+            list_id: &ListId,
             item_id: &ItemId,
             expected_version: u64,
             checked: bool,
-        ) -> Result<(ShoppingItem, u64), RepositoryError> {
+        ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
             self.checked.borrow_mut().push((
                 actor_id.clone(),
-                list_id.to_owned(),
+                list_id.as_str().to_owned(),
                 item_id.clone(),
                 expected_version,
                 checked,
@@ -269,27 +271,33 @@ mod tests {
             // returned list version is not accidentally read from the item version.
             Ok((
                 item,
-                self.list_version_after_mutation.max(expected_version + 10),
+                AggregateVersion::try_new(
+                    self.list_version_after_mutation.max(expected_version + 10),
+                )
+                .unwrap(),
             ))
         }
 
         fn delete_item(
             &self,
             actor_id: &UserId,
-            list_id: &str,
+            list_id: &ListId,
             item_id: &ItemId,
             expected_version: u64,
-        ) -> Result<u64, RepositoryError> {
+        ) -> Result<AggregateVersion, RepositoryError> {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
             self.deleted.borrow_mut().push((
                 actor_id.clone(),
-                list_id.to_owned(),
+                list_id.as_str().to_owned(),
                 item_id.clone(),
                 expected_version,
             ));
-            Ok(self.list_version_after_mutation.max(expected_version + 10))
+            Ok(AggregateVersion::try_new(
+                self.list_version_after_mutation.max(expected_version + 10),
+            )
+            .unwrap())
         }
     }
 

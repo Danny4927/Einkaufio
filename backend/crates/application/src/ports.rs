@@ -76,35 +76,49 @@ pub trait ShoppingListRepository {
 /// actor is authorized to access the list before revealing whether the list or item exists.
 /// Item changes and parent-list version changes must be atomic. Adding an item must also
 /// atomically enforce the 100-active-item limit and assign a unique position; the adapter
-/// must not trust a client-provided position.
+/// must not trust a client-provided position. The order of validation errors is deliberately
+/// unspecified: callers must rely on the documented error category only when a single
+/// precondition is violated.
 pub trait ShoppingItemRepository {
     /// Adds an item and returns the new parent-list version.
     fn add_item(
         &self,
         actor_id: &UserId,
-        list_id: &str,
-        expected_list_version: u64,
+        list_id: &ListId,
+        expected_list_version: AggregateVersion,
         item: ShoppingItem,
-    ) -> Result<u64, RepositoryError>;
+    ) -> Result<AggregateVersion, RepositoryError>;
+
+    /// Returns the ordered items for an authorized list.
+    ///
+    /// Implementations must authorize before revealing list existence. The result is ordered
+    /// by the repository-assigned position, which must be unique within the list.
+    fn list_items(
+        &self,
+        _actor_id: &UserId,
+        _list_id: &ListId,
+    ) -> Result<Vec<ShoppingItem>, RepositoryError> {
+        Err(RepositoryError::Unavailable)
+    }
 
     /// Changes the item and returns it together with the new parent-list version.
     fn set_item_checked(
         &self,
         actor_id: &UserId,
-        list_id: &str,
+        list_id: &ListId,
         item_id: &ItemId,
         expected_item_version: u64,
         checked: bool,
-    ) -> Result<(ShoppingItem, u64), RepositoryError>;
+    ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError>;
 
     /// Deletes the item and returns the new parent-list version.
     fn delete_item(
         &self,
         actor_id: &UserId,
-        list_id: &str,
+        list_id: &ListId,
         item_id: &ItemId,
         expected_item_version: u64,
-    ) -> Result<u64, RepositoryError>;
+    ) -> Result<AggregateVersion, RepositoryError>;
 }
 
 pub trait ListIdGenerator {

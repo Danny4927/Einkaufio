@@ -17,10 +17,14 @@
 - [x] Add PR evidence/security guidance.
 - [x] Register the Claude Code PreToolUse commit hook and add a deterministic hook test. A real Claude Code runtime commit test remains environment-specific.
 - [ ] **Verify the hook in a real Claude Code runtime:** confirm it appears in `/hooks` and project settings in `/status`, then make a disposable test commit and capture evidence that `make check` ran before Git executed the commit. Do not treat the fixture test as a runtime integration test.
-- [ ] **Repository contract tests (highest priority):** extract reusable behavioral scenarios for `ShoppingListRepository` and `ShoppingItemRepository`; run them against the in-memory fake now and every production adapter when introduced.
-  - Acceptance: tests cover authorization before existence disclosure, fail-closed/unavailable operations, atomic expected-version checks (including stale no-op rename), list/item version consistency, item capacity/position behavior, and repeated-delete semantics.
-  - Acceptance: contract scenarios are independent of adapter implementation and run in CI; adapter-specific integration tests cover transaction/conditional-write behavior.
-  - Sequencing: add list contract cases, add item contract cases, wire fake adapter, then require the same suite from the DynamoDB adapter PR. Do not claim production-adapter coverage before that adapter exists.
+- [x] **Repository contract scenarios and reference adapter**
+  - Shared list/item scenarios provision their own fixtures and run against the application-owned ports.
+  - List coverage: owner scoping, duplicate create, unauthorized existence non-disclosure, stale no-op rename, stale delete, version increments, repeated delete, and item cascade on list deletion.
+  - Item coverage: unauthorized actor, duplicate item ID, stale list version, stale item versions for check/delete, check and uncheck transitions, idempotent check, list/item version semantics, 100-active-item limit, repository-assigned unique positions, and repeated-delete `NotFound`.
+  - Capacity and ordering are verified through the shared `list_items` port, not adapter-only inspection helpers.
+  - Reuse: enable the adapters crate's `test-support` feature and invoke both contracts with a fresh `ShoppingListRepository`/`ShoppingItemRepository` pair.
+  - Limitation: the in-memory adapter is single-threaded test support (`RefCell`, therefore `!Sync`); it does not prove durable storage or production concurrency behavior. DynamoDB must add transaction/conditional-write integration tests.
+
 - [ ] **Verified actor at the authentication boundary:** introduce a type (e.g. `VerifiedActor`) that can only be created from successfully verified Cognito claims/principal data.
   - Acceptance: request DTOs cannot provide owner/actor identity; no public constructor/from-string conversion exists for untrusted input; application use cases receive the verified actor explicitly.
   - Tests: valid claims produce the actor; missing/invalid/expired/wrong-audience tokens fail before use-case invocation; client-supplied owner/actor fields are ignored or rejected.
@@ -84,7 +88,7 @@ These are initial product/abuse-control limits, not permanent technical constrai
 
 - [ ] Add Rust dependency rules that reject forbidden crate edges beyond the current architecture checker.
 - [ ] Add automated negative tests proving domain/application independence from AWS and HTTP frameworks (a temporary forbidden dependency/import must fail the relevant check).
-- [ ] Add a reusable adapter contract-test harness; execute against each adapter when available.
+- [x] Add a reusable adapter contract-test harness; execute against each adapter when available.
 - [ ] Add Angular import-boundary lint rules.
 - [ ] Add OpenAPI lint and breaking-change detection.
 - [ ] Configure GitHub branch protection/ruleset so required checks actually block merge.
@@ -165,14 +169,14 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [x] Adapter contract requires authorization before disclosing list/item existence.
 - [x] Port contract specifies atomic parent-list version updates, the 100-active-item limit and unique position assignment; these guarantees are not yet implemented by a concrete persistence adapter.
 - [x] Version semantics are deliberately distinct: item version tracks item changes; list version tracks list-wide changes. Check returns updated item + new list version; add/delete return the new list version.
-- [x] Existing use-case tests exercise the fake repository behavior; this is not yet a reusable shared contract suite for production adapters.
+- [x] Existing use-case tests exercise the fake repository behavior; the shared adapter contract suite is tracked under Agent and quality foundation (ADR 012).
 
 #### Remaining before the capability is complete
 
 - [ ] Authenticated HTTP handlers derive owner/actor ID exclusively from verified Cognito claims.
 - [ ] Concrete ID generator and persistence adapter.
 - [ ] Atomic persistence of list metadata and owner index/reference.
-- [ ] Shared repository contract tests and adapter integration tests (including stale-version no-op rename conflict, atomic version comparison, item/list version atomicity and repeated-delete NotFound).
+- [x] Shared repository contract scenarios run against the in-memory reference adapter; adapter-specific integration tests remain required for transaction/conditional-write behavior.
 - [ ] Item update and reorder use cases.
 - [ ] List detail query and cursor-based pagination.
 - [ ] Angular list overview/editor and item interaction flows with reviewed visual regression.

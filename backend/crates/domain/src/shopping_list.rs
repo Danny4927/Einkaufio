@@ -96,6 +96,14 @@ impl ShoppingList {
         }
     }
 
+    /// Advances the aggregate version for an item mutation in this list.
+    ///
+    /// The adapter must call this within the same atomic operation as the item write.
+    pub fn record_item_mutation(&mut self) -> Result<(), ListMutationError> {
+        self.version = self.version.checked_next()?;
+        Ok(())
+    }
+
     /// Renames this aggregate and advances its version when the name changes.
     ///
     /// Persistence adapters must compare the supplied expected version with the stored
