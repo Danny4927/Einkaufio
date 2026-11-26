@@ -448,7 +448,6 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
-}
 
     #[tokio::test]
     async fn authentication_middleware_rejects_missing_and_malformed_bearer_tokens() {
@@ -484,5 +483,4 @@ mod tests {
             );
         }
     }
-
-
+}
