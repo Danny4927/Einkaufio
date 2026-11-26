@@ -79,6 +79,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ListPage' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Lists]
       summary: Create a personal list
@@ -98,6 +100,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ShoppingListSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/lists/{listId}:
     parameters:
@@ -551,6 +555,14 @@ components:
   responses:
     Unauthorized:
       description: Missing or invalid authentication
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthenticationUnavailable:
+      description: Authentication configuration or Cognito JWKS service is unavailable
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
