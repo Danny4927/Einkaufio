@@ -15,9 +15,9 @@ use axum::{
 };
 use einkaufio_application::{
     CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError, ListIdGenerator,
-    ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery, ShoppingListRepository,
+    ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery, ShoppingList,
+    ShoppingListRepository,
 };
-use einkaufio_domain::ShoppingList;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
