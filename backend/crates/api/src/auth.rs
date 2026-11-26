@@ -165,7 +165,6 @@ impl CognitoTokenVerifier {
         {
             let mut cache = self.cache.write().await;
             cache.last_refresh_at = Some(now);
-        cache.last_refresh_failed = false;
             cache.last_refresh_failed = true;
         }
 
@@ -201,6 +200,7 @@ impl CognitoTokenVerifier {
         cache.keys = keys;
         cache.expires_at = now.saturating_add(300);
         cache.last_refresh_at = Some(now);
+        cache.last_refresh_failed = false;
         cache.keys.get(kid).cloned().ok_or(AuthError::InvalidToken)
     }
 
