@@ -1,7 +1,8 @@
 //! In-memory reference adapter used by the repository contract tests.
 //!
-//! This adapter is deliberately small and deterministic. It models the repository port
-//! guarantees without claiming to provide durable persistence or production concurrency.
+//! This adapter is deliberately small and deterministic. It models repository port
+//! guarantees without durable persistence or production concurrency. It uses `RefCell`,
+//! so it is intentionally `!Sync` and must only be used as single-threaded test support.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -127,153 +128,104 @@ impl ShoppingItemRepository for InMemoryRepository {
     fn add_item(
         &self,
         actor_id: &UserId,
-        list_id: &str,
-        expected_list_version: u64,
+        list_id: &ListId,
+        expected_list_version: AggregateVersion,
         item: ShoppingItem,
-    ) -> Result<u64, RepositoryError> {
-        let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
+    ) -> Result<AggregateVersion, RepositoryError> {
         let mut state = self.state.borrow_mut();
 
-        // Check access before exposing list revision, capacity or item existence.
-        let stored_list = state.lists.get(&list_id).ok_or(RepositoryError::NotFound)?;
+        // Authorize before exposing version, capacity or item existence.
+        let stored_list = state.lists.get(list_id).ok_or(RepositoryError::NotFound)?;
         if stored_list.owner_id() != actor_id {
             return Err(RepositoryError::NotFound);
         }
-        if stored_list.version() != expected_list_version {
+        if stored_list.aggregate_version() != expected_list_version {
             return Err(RepositoryError::Conflict);
         }
-
-        let active_count = state
-            .items
-            .keys()
-            .filter(|(candidate, _)| candidate == &list_id)
-            .count();
-        if active_count >= ShoppingList::MAX_ACTIVE_ITEMS {
-            return Err(RepositoryError::ItemLimitReached);
-        }
-
         let key = (list_id.clone(), item.id().clone());
         if state.items.contains_key(&key) {
             return Err(RepositoryError::AlreadyExists);
         }
+        let active_count = state.items.keys().filter(|(candidate, _)| candidate == list_id).count();
+        if active_count >= ShoppingList::MAX_ACTIVE_ITEMS {
+            return Err(RepositoryError::ItemLimitReached);
+        }
 
-        let position = *state.next_positions.get(&list_id).unwrap_or(&0);
-        let assigned = ShoppingItem::new(
-            item.id().clone(),
-            ItemName::try_new(item.name().as_str()).map_err(|_| RepositoryError::Unavailable)?,
-            item.quantity()
-                .map(|value| {
-                    ItemQuantity::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
-                })
-                .transpose()?,
-            item.unit()
-                .map(|value| {
-                    ItemUnit::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
-                })
-                .transpose()?,
-            item.note()
-                .map(|value| {
-                    ItemNote::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
-                })
-                .transpose()?,
-            position,
-            actor_id.clone(),
-        );
-
-        // One exclusive in-memory transaction: advance the parent aggregate and insert the
-        // item only after all validations have succeeded.
-        let next_list_version = Self::increment_list_version(&mut state, &list_id)?;
+        let position = *state.next_positions.get(list_id).unwrap_or(&0);
+        let assigned = item.with_position(position);
+        let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
+        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        let next_version = list.aggregate_version();
         state.items.insert(key, assigned);
-        state
-            .next_positions
-            .insert(list_id, position.saturating_add(1));
-        Ok(next_list_version)
+        state.next_positions.insert(list_id.clone(), position + 1);
+        Ok(next_version)
+    }
+
+    fn list_items(
+        &self,
+        actor_id: &UserId,
+        list_id: &ListId,
+    ) -> Result<Vec<ShoppingItem>, RepositoryError> {
+        let state = self.state.borrow();
+        let list = state.lists.get(list_id).ok_or(RepositoryError::NotFound)?;
+        if list.owner_id() != actor_id {
+            return Err(RepositoryError::NotFound);
+        }
+        let mut items: Vec<_> = state.items.iter()
+            .filter(|((candidate, _), _)| candidate == list_id)
+            .map(|(_, item)| item.clone())
+            .collect();
+        items.sort_by_key(ShoppingItem::position);
+        Ok(items)
     }
 
     fn set_item_checked(
         &self,
         actor_id: &UserId,
-        list_id: &str,
+        list_id: &ListId,
         item_id: &ItemId,
         expected_item_version: u64,
         checked: bool,
-    ) -> Result<(ShoppingItem, u64), RepositoryError> {
-        let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
+    ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
         let mut state = self.state.borrow_mut();
-        Self::authorized_list(&mut state, actor_id, &list_id)?;
+        Self::authorized_list(&mut state, actor_id, list_id)?;
 
         let key = (list_id.clone(), item_id.clone());
         let stored = state.items.get(&key).ok_or(RepositoryError::NotFound)?;
         if stored.version() != expected_item_version {
             return Err(RepositoryError::Conflict);
         }
-
         let mut updated = stored.clone();
-        let changed = updated.set_checked(checked);
-        let list_version = if changed {
-            // Validate the aggregate transition before storing either changed record.
-            let next = state
-                .lists
-                .get(&list_id)
-                .ok_or(RepositoryError::NotFound)?
-                .aggregate_version()
-                .checked_next()
-                .map_err(|_| RepositoryError::VersionExhausted)?;
-            let item_version = updated.version();
-            let version = next.as_u64();
-            let list = state
-                .lists
-                .get_mut(&list_id)
-                .ok_or(RepositoryError::NotFound)?;
-            list.record_item_mutation()
-                .map_err(|_| RepositoryError::VersionExhausted)?;
-            debug_assert_eq!(list.version(), version);
-            debug_assert_eq!(updated.version(), item_version);
-            state.items.insert(key, updated.clone());
-            version
-        } else {
-            state
-                .lists
-                .get(&list_id)
-                .ok_or(RepositoryError::NotFound)?
-                .version()
-        };
+        if updated.set_checked(checked) {
+            let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
+            list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        }
+        let list_version = state.lists.get(list_id)
+            .ok_or(RepositoryError::NotFound)?
+            .aggregate_version();
+        state.items.insert(key, updated.clone());
         Ok((updated, list_version))
     }
 
     fn delete_item(
         &self,
         actor_id: &UserId,
-        list_id: &str,
+        list_id: &ListId,
         item_id: &ItemId,
         expected_item_version: u64,
-    ) -> Result<u64, RepositoryError> {
-        let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
+    ) -> Result<AggregateVersion, RepositoryError> {
         let mut state = self.state.borrow_mut();
-        Self::authorized_list(&mut state, actor_id, &list_id)?;
+        Self::authorized_list(&mut state, actor_id, list_id)?;
 
         let key = (list_id.clone(), item_id.clone());
         let stored = state.items.get(&key).ok_or(RepositoryError::NotFound)?;
         if stored.version() != expected_item_version {
             return Err(RepositoryError::Conflict);
         }
-
-        let next_list_version = state
-            .lists
-            .get(&list_id)
-            .ok_or(RepositoryError::NotFound)?
-            .aggregate_version()
-            .checked_next()
-            .map_err(|_| RepositoryError::VersionExhausted)?
-            .as_u64();
-        let list = state
-            .lists
-            .get_mut(&list_id)
-            .ok_or(RepositoryError::NotFound)?;
-        list.record_item_mutation()
-            .map_err(|_| RepositoryError::VersionExhausted)?;
-        debug_assert_eq!(list.version(), next_list_version);
+        let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
+        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        let next_version = list.aggregate_version();
         state.items.remove(&key);
-        Ok(next_list_version)
+        Ok(next_version)
     }
 }
