@@ -137,6 +137,7 @@ impl<'a> SetShoppingItemChecked<'a> {
                 command.expected_item_version,
                 command.checked,
             )
+            .map(|(item, version)| (item, version.as_u64()))
             .map_err(map_repository_error)
     }
 }
@@ -177,6 +178,7 @@ impl<'a> DeleteShoppingItem<'a> {
                 &item_id,
                 command.expected_item_version,
             )
+            .map(|version| version.as_u64())
             .map_err(map_repository_error)
     }
 }
@@ -286,7 +288,7 @@ mod tests {
             }
             self.deleted.borrow_mut().push((
                 actor_id.clone(),
-                list_id.to_owned(),
+                list_id.as_str().to_owned(),
                 item_id.clone(),
                 expected_version,
             ));
