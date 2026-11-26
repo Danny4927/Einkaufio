@@ -9,8 +9,6 @@ use einkaufio_domain::{
     AggregateVersion, ItemId, ItemName, ListId, ListName, ShoppingItem, ShoppingList, UserId,
 };
 
-use crate::in_memory::InMemoryRepository;
-
 fn user(value: &str) -> UserId {
     UserId::try_new(value).expect("valid user")
 }
@@ -228,6 +226,7 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::in_memory::InMemoryRepository;
 
     #[test]
     fn in_memory_adapter_passes_list_contract() {
