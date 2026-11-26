@@ -46,44 +46,81 @@ pub fn run_shopping_list_contract(repository: &impl ShoppingListRepository) {
         repository.list_personal_for_owner(&owner).unwrap(),
         vec![created.clone()]
     );
-    assert!(repository.list_personal_for_owner(&other).unwrap().is_empty());
+    assert!(
+        repository
+            .list_personal_for_owner(&other)
+            .unwrap()
+            .is_empty()
+    );
 
     // Unauthorized existing and absent resources are indistinguishable.
     assert_eq!(
-        repository.rename_personal(&other, created.id(), version(1), ListName::try_new("X").unwrap()),
+        repository.rename_personal(
+            &other,
+            created.id(),
+            version(1),
+            ListName::try_new("X").unwrap()
+        ),
         Err(RepositoryError::NotFound)
     );
     assert_eq!(
-        repository.rename_personal(&other, &list_id("absent"), version(1), ListName::try_new("X").unwrap()),
+        repository.rename_personal(
+            &other,
+            &list_id("absent"),
+            version(1),
+            ListName::try_new("X").unwrap()
+        ),
         Err(RepositoryError::NotFound)
     );
     // Stale expected version must conflict even when the requested name is unchanged.
     assert_eq!(
-        repository.rename_personal(&owner, created.id(), version(2), ListName::try_new("Einkauf").unwrap()),
+        repository.rename_personal(
+            &owner,
+            created.id(),
+            version(2),
+            ListName::try_new("Einkauf").unwrap()
+        ),
         Err(RepositoryError::Conflict)
     );
 
-    let renamed = repository.rename_personal(
-        &owner, created.id(), version(1), ListName::try_new("Drogerie").unwrap()
-    ).unwrap();
+    let renamed = repository
+        .rename_personal(
+            &owner,
+            created.id(),
+            version(1),
+            ListName::try_new("Drogerie").unwrap(),
+        )
+        .unwrap();
     assert_eq!(renamed.name().as_str(), "Drogerie");
     assert_eq!(renamed.version(), 2);
 
-    let no_op = repository.rename_personal(
-        &owner, created.id(), version(2), ListName::try_new("Drogerie").unwrap()
-    ).unwrap();
+    let no_op = repository
+        .rename_personal(
+            &owner,
+            created.id(),
+            version(2),
+            ListName::try_new("Drogerie").unwrap(),
+        )
+        .unwrap();
     assert_eq!(no_op.version(), 2);
 
     assert_eq!(
         repository.delete_personal(&other, created.id(), version(2)),
         Err(RepositoryError::NotFound)
     );
-    repository.delete_personal(&owner, created.id(), version(2)).unwrap();
+    repository
+        .delete_personal(&owner, created.id(), version(2))
+        .unwrap();
     assert_eq!(
         repository.delete_personal(&owner, created.id(), version(2)),
         Err(RepositoryError::NotFound)
     );
-    assert!(repository.list_personal_for_owner(&owner).unwrap().is_empty());
+    assert!(
+        repository
+            .list_personal_for_owner(&owner)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Shared item lifecycle scenarios. Requires a fresh repository with the matching list
@@ -95,53 +132,95 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
 
     // Existing and absent parent lists must be indistinguishable for an unauthorized actor.
     assert_eq!(
-        repository.add_item(&other, list.as_str(), 1, item("unauthorized-item", "contract-item-owner")),
+        repository.add_item(
+            &other,
+            list.as_str(),
+            1,
+            item("unauthorized-item", "contract-item-owner")
+        ),
         Err(RepositoryError::NotFound)
     );
     assert_eq!(
-        repository.add_item(&other, "missing-parent-list", 1, item("unknown-parent-item", "contract-item-owner")),
+        repository.add_item(
+            &other,
+            "missing-parent-list",
+            1,
+            item("unknown-parent-item", "contract-item-owner")
+        ),
         Err(RepositoryError::NotFound)
     );
-    let list_version = repository.add_item(
-        &owner, list.as_str(), 1, item("contract-item-1", "contract-item-owner")
-    ).expect("first item");
+    let list_version = repository
+        .add_item(
+            &owner,
+            list.as_str(),
+            1,
+            item("contract-item-1", "contract-item-owner"),
+        )
+        .expect("first item");
     assert_eq!(list_version, 2);
 
     assert_eq!(
-        repository.add_item(&owner, list.as_str(), 1, item("stale-item", "contract-item-owner")),
+        repository.add_item(
+            &owner,
+            list.as_str(),
+            1,
+            item("stale-item", "contract-item-owner")
+        ),
         Err(RepositoryError::Conflict)
     );
-    let (checked, list_version) = repository.set_item_checked(
-        &owner, list.as_str(), &ItemId::try_new("contract-item-1").unwrap(), 1, true
-    ).unwrap();
+    let (checked, list_version) = repository
+        .set_item_checked(
+            &owner,
+            list.as_str(),
+            &ItemId::try_new("contract-item-1").unwrap(),
+            1,
+            true,
+        )
+        .unwrap();
     assert!(checked.checked());
     assert_eq!(checked.version(), 2);
     assert_eq!(list_version, 3);
 
     // Idempotent check must not advance either version.
-    let (unchanged, list_version) = repository.set_item_checked(
-        &owner, list.as_str(), &ItemId::try_new("contract-item-1").unwrap(), 2, true
-    ).unwrap();
+    let (unchanged, list_version) = repository
+        .set_item_checked(
+            &owner,
+            list.as_str(),
+            &ItemId::try_new("contract-item-1").unwrap(),
+            2,
+            true,
+        )
+        .unwrap();
     assert_eq!(unchanged.version(), 2);
     assert_eq!(list_version, 3);
 
     assert_eq!(
         repository.delete_item(
-            &other, list.as_str(), &ItemId::try_new("contract-item-1").unwrap(), 2
+            &other,
+            list.as_str(),
+            &ItemId::try_new("contract-item-1").unwrap(),
+            2
         ),
         Err(RepositoryError::NotFound)
     );
-    let next = repository.delete_item(
-        &owner, list.as_str(), &ItemId::try_new("contract-item-1").unwrap(), 2
-    ).unwrap();
+    let next = repository
+        .delete_item(
+            &owner,
+            list.as_str(),
+            &ItemId::try_new("contract-item-1").unwrap(),
+            2,
+        )
+        .unwrap();
     assert_eq!(next, 4);
     assert_eq!(
         repository.delete_item(
-            &owner, list.as_str(), &ItemId::try_new("contract-item-1").unwrap(), 2
+            &owner,
+            list.as_str(),
+            &ItemId::try_new("contract-item-1").unwrap(),
+            2
         ),
         Err(RepositoryError::NotFound)
     );
-
 
 }
 
@@ -159,7 +238,9 @@ mod tests {
     #[test]
     fn in_memory_adapter_passes_item_contract() {
         let repository = InMemoryRepository::new();
-        repository.create_personal(list("contract-item-list", "contract-item-owner", "Items")).unwrap();
+        repository
+            .create_personal(list("contract-item-list", "contract-item-owner", "Items"))
+            .unwrap();
         run_shopping_item_contract(&repository);
     }
 
