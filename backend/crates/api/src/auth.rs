@@ -114,7 +114,7 @@ impl CognitoTokenVerifier {
     }
 
     #[cfg(test)]
-    fn new_with_jwks_url(config: CognitoConfig, jwks_url: String) -> Result<Self, AuthError> {
+    pub(crate) fn new_with_jwks_url(config: CognitoConfig, jwks_url: String) -> Result<Self, AuthError> {
         let mut verifier = Self::new(config)?;
         verifier.jwks_url = jwks_url;
         Ok(verifier)
