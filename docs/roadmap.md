@@ -25,11 +25,11 @@
   - Reuse: enable the adapters crate's `test-support` feature and invoke both contracts with a fresh `ShoppingListRepository`/`ShoppingItemRepository` pair.
   - Limitation: the in-memory adapter is single-threaded test support (`RefCell`, therefore `!Sync`); it does not prove durable storage or production concurrency behavior. DynamoDB must add transaction/conditional-write integration tests.
 
-- [ ] **HTTP transport foundation (in progress in PR):** Axum router, public health endpoint, personal-list route DTOs and fail-closed authentication gate. The routes intentionally return `503 authentication_unavailable` until Cognito JWT verification can supply a trusted principal; no client-provided owner ID is accepted.
-- [ ] **Verified actor at the authentication boundary:** introduce a type (e.g. `VerifiedActor`) that can only be created from successfully verified Cognito claims/principal data.
+- [x] **HTTP transport foundation:** Axum router, public health endpoint, personal-list route DTOs and fail-closed authentication gate.\n- [ ] **Cognito JWT authentication (in progress in PR #12):** verify RS256 access tokens against issuer-derived Cognito JWKS; validate issuer, expiry/not-before, `token_use=access`, app `client_id` and `sub`; inject a crate-private verified actor only after successful verification. Missing configuration and JWKS failures remain fail-closed.
+- [x] **Verified actor boundary type:** `VerifiedActor` can only be created inside the API crate from a verifier-produced principal; request DTOs cannot supply an owner ID.
   - Acceptance: request DTOs cannot provide owner/actor identity; no public constructor/from-string conversion exists for untrusted input; application use cases receive the verified actor explicitly.
   - Tests: valid claims produce the actor; missing/invalid/expired/wrong-audience tokens fail before use-case invocation; client-supplied owner/actor fields are ignored or rejected.
-  - Sequencing: implement alongside Cognito JWT verification in M2, not as an isolated string newtype before the trust boundary exists.
+  - Sequencing: implemented with Cognito JWT verification so the type is not an unverified string wrapper.
 - [ ] **Dependency and test-strength tooling:** add a pinned `cargo-deny` policy first, then mutation testing with `cargo-mutants` scoped to domain/application, and finally a coverage threshold once a stable baseline exists.
   - Acceptance: CI fails on configured license/advisory/ban/source violations; mutation report identifies surviving mutants; coverage threshold is documented, measured and ratcheted rather than chosen arbitrarily.
   - Keep fast local targets available; expensive mutation runs may be a separate CI job or scheduled workflow.
