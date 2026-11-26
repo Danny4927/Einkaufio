@@ -145,8 +145,8 @@ impl ShoppingItemRepository for InMemoryRepository {
             actor_id.clone(),
         );
 
-        // All checks are complete. The following writes are protected by one exclusive
-        // state borrow and therefore represent one atomic adapter operation.
+        // All validation is complete. The parent revision and item insert are committed
+        // under one exclusive state borrow, modeling the port's atomicity requirement.
         let list = state.lists.get_mut(&list_id).ok_or(RepositoryError::NotFound)?;
         list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
         let next_list_version = list.version();
