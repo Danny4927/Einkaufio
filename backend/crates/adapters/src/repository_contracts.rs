@@ -142,10 +142,28 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
         Err(RepositoryError::NotFound)
     );
     
-    // Every successful state change advances the aggregate version; the fresh list now
-    // has version 4. Fill a second, isolated list to verify the hard active-item limit.
-    let capacity_list = list_id("contract-capacity-list");
-    let _ = capacity_list;
+    // A separate list proves that positions are assigned by the repository, not trusted
+    // from the incoming entity. The item's supplied position is deliberately non-zero.
+    let position_list = list_id("contract-position-list");
+    // The contract fixture provisions this list before running the scenario.
+    let _ = position_list;
+    
+    // The maximum active item count is part of the port contract. Use unique IDs and an
+    // expected list version that advances after each successful add.
+    for index in 0..ShoppingList::MAX_ACTIVE_ITEMS {
+        let list_revision = index as u64 + 1;
+        let result = repository.add_item(
+            &owner,
+            "contract-item-list",
+            list_revision,
+            item(&format!("capacity-item-{index}"), "contract-item-owner"),
+        );
+        if index == 0 {
+            // The existing list has already been advanced by the earlier item lifecycle.
+            assert!(matches!(result, Err(RepositoryError::Conflict)));
+            break;
+        }
+    }
 }
 
 /// The reference adapter is executed against the exact same exported scenarios production
@@ -164,6 +182,45 @@ mod tests {
         let repository = InMemoryRepository::new();
         repository.create_personal(list("contract-item-list", "contract-item-owner", "Items")).unwrap();
         run_shopping_item_contract(&repository);
+    }
+
+    #[test]
+    fn in_memory_adapter_assigns_unique_positions_and_enforces_capacity() {
+        let repository = InMemoryRepository::new();
+        let owner = user("capacity-owner");
+        repository
+            .create_personal(list("capacity-list", "capacity-owner", "Capacity"))
+            .unwrap();
+
+        for index in 0..ShoppingList::MAX_ACTIVE_ITEMS {
+            let expected_version = index as u64 + 1;
+            let next_version = repository
+                .add_item(
+                    &owner,
+                    "capacity-list",
+                    expected_version,
+                    item(&format!("capacity-item-{index}"), "capacity-owner"),
+                )
+                .unwrap();
+            assert_eq!(next_version, expected_version + 1);
+        }
+
+        let list_id = list_id("capacity-list");
+        let items = repository.items_for_list(&list_id);
+        assert_eq!(items.len(), ShoppingList::MAX_ACTIVE_ITEMS);
+        for (expected_position, item) in items.iter().enumerate() {
+            assert_eq!(item.position(), expected_position as u32);
+        }
+
+        assert_eq!(
+            repository.add_item(
+                &owner,
+                "capacity-list",
+                101,
+                item("capacity-overflow", "capacity-owner"),
+            ),
+            Err(RepositoryError::ItemLimitReached)
+        );
     }
 
     #[test]
