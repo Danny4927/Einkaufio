@@ -197,13 +197,12 @@ impl ShoppingItemRepository for InMemoryRepository {
         if stored.version() != expected_item_version {
             return Err(RepositoryError::Conflict);
         }
-        let position = stored.position();
+        let _position = stored.position();
 
         let list = state.lists.get_mut(&list_id).ok_or(RepositoryError::NotFound)?;
         list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
         let next_list_version = list.version();
         state.items.remove(&key);
-        let _ = position;
         Ok(next_list_version)
     }
 }
