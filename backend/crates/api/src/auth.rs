@@ -94,6 +94,7 @@ struct KeyCache {
     keys: HashMap<String, DecodingKey>,
     expires_at: u64,
     last_refresh_at: Option<u64>,
+    last_refresh_failed: bool,
 }
 
 impl CognitoTokenVerifier {
@@ -152,12 +153,21 @@ impl CognitoTokenVerifier {
                 .last_refresh_at
                 .is_some_and(|last| now.saturating_sub(last) < 30)
             {
-                return Err(AuthError::InvalidToken);
+                return Err(if cache.last_refresh_failed {
+                    AuthError::Unavailable
+                } else {
+                    AuthError::InvalidToken
+                });
             }
         }
 
         // Record the attempt before I/O so failed requests are throttled too.
-        self.cache.write().await.last_refresh_at = Some(now);
+        {
+            let mut cache = self.cache.write().await;
+            cache.last_refresh_at = Some(now);
+        cache.last_refresh_failed = false;
+            cache.last_refresh_failed = true;
+        }
 
         // Never follow jku/x5u supplied by an untrusted token header.
         let jwks: Jwks = self
@@ -305,7 +315,7 @@ mod jwks_integration_tests {
             "exp":now+300,"iat":now,"token_use":"access","client_id":"expected-client"
         });
         for (key, val) in overrides.as_object().unwrap() {
-            value[key] = val.clone();
+            value[key.as_str()] = val.clone();
         }
         value
     }
@@ -372,6 +382,7 @@ mod jwks_integration_tests {
         {
             let mut cache = f.verifier.cache.write().await;
             cache.last_refresh_at = None;
+            cache.last_refresh_failed = false;
         }
         let mut document = f.document.write().await;
         document["keys"][0]["kid"] = json!("key-2");
