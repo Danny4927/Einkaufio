@@ -113,6 +113,14 @@ impl ShoppingItem {
         self.position
     }
 
+    /// Returns this item with a repository-assigned position.
+    ///
+    /// Position is persistence/list-order metadata and must not be trusted from clients.
+    pub fn with_position(mut self, position: u32) -> Self {
+        self.position = position;
+        self
+    }
+
     pub fn version(&self) -> u64 {
         self.version
     }
