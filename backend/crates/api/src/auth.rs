@@ -112,10 +112,10 @@ impl CognitoTokenVerifier {
 
         {
             let cache = self.cache.read().await;
-            if cache.expires_at > now {
-                if let Some(key) = cache.keys.get(kid) {
-                    return Ok(key.clone());
-                }
+            if cache.expires_at > now
+                && let Some(key) = cache.keys.get(kid)
+            {
+                return Ok(key.clone());
             }
         }
 
@@ -138,10 +138,9 @@ impl CognitoTokenVerifier {
             if key.kty == "RSA"
                 && key.alg.as_deref().unwrap_or("RS256") == "RS256"
                 && key.key_use.as_deref().unwrap_or("sig") == "sig"
+                && let Ok(decoded) = DecodingKey::from_rsa_components(&key.n, &key.e)
             {
-                if let Ok(decoded) = DecodingKey::from_rsa_components(&key.n, &key.e) {
-                    keys.insert(key.kid, decoded);
-                }
+                keys.insert(key.kid, decoded);
             }
         }
 
