@@ -53,7 +53,16 @@ impl ApiState {
     }
 }
 
-pub fn router(state: ApiState) -> Router {
+pub fn router(mut state: ApiState) -> Router {
+    // Runtime callers get Cognito verification from deployment configuration by default.
+    // If configuration is absent or invalid, keep the state unauthenticated and fail closed.
+    if state.verifier.is_none()
+        && let Ok(config) = crate::auth::CognitoConfig::from_env()
+        && let Ok(verifier) = CognitoTokenVerifier::new(config)
+    {
+        state.verifier = Some(Arc::new(verifier));
+    }
+
     let protected = protected_routes().route_layer(middleware::from_fn_with_state(
         state.clone(),
         require_verified_actor,
