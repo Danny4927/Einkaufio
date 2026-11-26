@@ -118,7 +118,12 @@ async fn require_verified_actor(
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|header| header.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
+        .and_then(|value| {
+            value
+                .get(..7)
+                .filter(|scheme| scheme.eq_ignore_ascii_case("Bearer "))
+                .map(|_| &value[7..])
+        })
         .filter(|value| !value.is_empty())
     {
         Some(token) => token,
@@ -254,6 +259,7 @@ impl From<ListPersonalListsError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let unauthorized = matches!(self, Self::Unauthorized);
         let (status, code, message) = match self {
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
@@ -281,7 +287,14 @@ impl IntoResponse for ApiError {
                 "An internal error occurred",
             ),
         };
-        (status, Json(ErrorResponse::new(code, message))).into_response()
+        let mut response = (status, Json(ErrorResponse::new(code, message))).into_response();
+        if unauthorized {
+            response.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer"),
+            );
+        }
+        response
     }
 }
 
@@ -393,6 +406,9 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["error"]["code"], "authentication_unavailable");
         }
     }
 
@@ -403,6 +419,7 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["id"], "test-list-id");
+        assert_eq!(value["name"], "Groceries");
     }
 
     #[tokio::test]
