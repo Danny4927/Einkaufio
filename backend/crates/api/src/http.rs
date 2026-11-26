@@ -1,6 +1,6 @@
 //! HTTP transport for personal shopping lists.
 //!
-//! Authentication is intentionally fail-closed until Cognito JWT verification is provided.
+//! Authentication is fail-closed unless Cognito JWT verification is configured.
 //! No caller-controlled identity is accepted by these handlers.
 
 use std::sync::Arc;\n\nuse crate::auth::{AuthError, CognitoTokenVerifier};
@@ -222,7 +222,7 @@ impl From<ListPersonalListsError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::AuthenticationUnavailable => (
+            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::AuthenticationUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "authentication_unavailable",
                 "Authentication is not configured",
