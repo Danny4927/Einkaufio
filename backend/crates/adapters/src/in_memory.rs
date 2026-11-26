@@ -116,11 +116,15 @@ impl ShoppingItemRepository for InMemoryRepository {
         let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
         let mut state = self.state.borrow_mut();
 
-        let active_count = state.items.keys().filter(|(candidate, _)| candidate == &list_id).count();
-        let list = Self::owned_list(&mut state, actor_id, &list_id)?;
-        if list.version() != expected_list_version {
+        // Authorize before disclosing list version, item capacity or item existence.
+        let stored_list = state.lists.get(&list_id).ok_or(RepositoryError::NotFound)?;
+        if stored_list.owner_id() != actor_id {
+            return Err(RepositoryError::NotFound);
+        }
+        if stored_list.version() != expected_list_version {
             return Err(RepositoryError::Conflict);
         }
+        let active_count = state.items.keys().filter(|(candidate, _)| candidate == &list_id).count();
         if active_count >= ShoppingList::MAX_ACTIVE_ITEMS {
             return Err(RepositoryError::ItemLimitReached);
         }
