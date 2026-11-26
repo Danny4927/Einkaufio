@@ -150,6 +150,9 @@ impl CognitoTokenVerifier {
             }
         }
 
+        // Record the attempt before I/O so failed requests are throttled too.
+        self.cache.write().await.last_refresh_at = Some(now);
+
         // Never follow jku/x5u supplied by an untrusted token header.
         let jwks: Jwks = self
             .client
