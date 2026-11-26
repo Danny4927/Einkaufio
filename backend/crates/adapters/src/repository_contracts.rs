@@ -227,7 +227,6 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
 mod tests {
     use super::*;
     use crate::in_memory::InMemoryRepository;
-    use crate::in_memory::InMemoryRepository;
 
     #[test]
     fn in_memory_adapter_passes_list_contract() {
