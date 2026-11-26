@@ -162,13 +162,19 @@ impl ShoppingItemRepository for InMemoryRepository {
             item.id().clone(),
             ItemName::try_new(item.name().as_str()).map_err(|_| RepositoryError::Unavailable)?,
             item.quantity()
-                .map(|value| ItemQuantity::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .map(|value| {
+                    ItemQuantity::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
+                })
                 .transpose()?,
             item.unit()
-                .map(|value| ItemUnit::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .map(|value| {
+                    ItemUnit::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
+                })
                 .transpose()?,
             item.note()
-                .map(|value| ItemNote::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .map(|value| {
+                    ItemNote::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable)
+                })
                 .transpose()?,
             position,
             actor_id.clone(),
