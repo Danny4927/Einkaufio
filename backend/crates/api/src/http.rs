@@ -1,6 +1,6 @@
 //! HTTP transport for personal shopping lists.
 //!
-//! Authentication is fail-closed unless Cognito JWT verification is configured.
+//! Authentication is enforced with Cognito access-token verification.
 //! No caller-controlled identity is accepted by these handlers.
 
 use std::sync::Arc;\n\nuse crate::auth::{AuthError, CognitoTokenVerifier};
@@ -32,6 +32,11 @@ impl ApiState {
         ids: Arc<dyn ListIdGenerator + Send + Sync>,
     ) -> Self {
         Self { lists, ids, verifier: None }
+    }
+
+    pub fn with_authenticator(mut self, verifier: CognitoTokenVerifier) -> Self {
+        self.verifier = Some(Arc::new(verifier));
+        self
     }
 }
 
@@ -98,11 +103,29 @@ impl FromRequestParts<ApiState> for VerifiedActor {
     }
 }
 
-async fn require_verified_actor(_request: axum::extract::Request, _next: Next) -> Response {
-    // This placeholder is intentionally not configurable to accept an arbitrary user ID.
-    // Replace it only together with cryptographic Cognito token verification and a verified
-    // principal extractor.
-    ApiError::AuthenticationUnavailable.into_response()
+async fn require_verified_actor(
+    State(state): State<ApiState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let Some(verifier) = state.verifier else {
+        return ApiError::AuthenticationUnavailable.into_response();
+    };
+    let token = match request.headers().get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .filter(|t| !t.is_empty()) {
+        Some(token) => token,
+        None => return ApiError::Unauthorized.into_response(),
+    };
+    match verifier.verify(token).await {
+        Ok(principal) => {
+            request.extensions_mut().insert(VerifiedActor::from_verified_claims(principal.subject));
+            next.run(request).await
+        }
+        Err(AuthError::InvalidToken) => ApiError::Unauthorized.into_response(),
+        Err(AuthError::Unavailable) => ApiError::AuthenticationUnavailable.into_response(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -188,6 +211,7 @@ impl ErrorResponse {
 #[derive(Debug)]
 enum ApiError {
     AuthenticationUnavailable,
+    Unauthorized,
     InvalidInput,
     Unavailable,
     Internal,
