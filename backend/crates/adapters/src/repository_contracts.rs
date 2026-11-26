@@ -88,7 +88,10 @@ pub fn run_shopping_list_contract(
         lists.delete_personal(&other, created.id(), version(3)),
         Err(RepositoryError::NotFound)
     );
-    lists.delete_personal(&owner, created.id(), version(2)).expect_err("stale after item add");
+    assert_eq!(
+        lists.delete_personal(&owner, created.id(), version(2)),
+        Err(RepositoryError::Conflict)
+    );
     lists.delete_personal(&owner, created.id(), version(3)).unwrap();
     assert_eq!(items.list_items(&owner, created.id()), Err(RepositoryError::NotFound));
 
