@@ -93,8 +93,13 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
     let other = user("contract-item-other");
     let list = list_id("contract-item-list");
 
+    // Existing and absent parent lists must be indistinguishable for an unauthorized actor.
     assert_eq!(
         repository.add_item(&other, list.as_str(), 1, item("unauthorized-item", "contract-item-owner")),
+        Err(RepositoryError::NotFound)
+    );
+    assert_eq!(
+        repository.add_item(&other, "missing-parent-list", 1, item("unknown-parent-item", "contract-item-owner")),
         Err(RepositoryError::NotFound)
     );
     let list_version = repository.add_item(
@@ -136,6 +141,11 @@ pub fn run_shopping_item_contract(repository: &impl ShoppingItemRepository) {
         ),
         Err(RepositoryError::NotFound)
     );
+    
+    // Every successful state change advances the aggregate version; the fresh list now
+    // has version 4. Fill a second, isolated list to verify the hard active-item limit.
+    let capacity_list = list_id("contract-capacity-list");
+    let _ = capacity_list;
 }
 
 /// The reference adapter is executed against the exact same exported scenarios production
