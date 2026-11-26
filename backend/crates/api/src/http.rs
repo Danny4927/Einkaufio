@@ -73,6 +73,7 @@ pub struct VerifiedActor {
 
 impl VerifiedActor {
     /// The only production constructor is crate-private so transport callers cannot forge identity.
+    #[allow(dead_code)] // Wired by the Cognito verifier in the authentication milestone.
     pub(crate) fn from_verified_claims(owner_id: String) -> Self {
         Self { owner_id }
     }
@@ -188,7 +189,6 @@ impl ErrorResponse {
 enum ApiError {
     AuthenticationUnavailable,
     InvalidInput,
-    Conflict,
     Unavailable,
     Internal,
 }
@@ -231,11 +231,6 @@ impl IntoResponse for ApiError {
                 "invalid_input",
                 "The request is invalid",
             ),
-            Self::Conflict => (
-                StatusCode::CONFLICT,
-                "conflict",
-                "The resource conflicts with the current state",
-            ),
             Self::Unavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service_unavailable",
@@ -276,19 +271,6 @@ mod tests {
             Ok(())
         }
 
-        fn list_personal_for_owner(
-            &self,
-            owner_id: &einkaufio_domain::UserId,
-        ) -> Result<Vec<ShoppingList>, einkaufio_application::RepositoryError> {
-            Ok(self
-                .lists
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|list| list.owner_id() == owner_id)
-                .cloned()
-                .collect())
-        }
     }
 
     struct TestIds;
