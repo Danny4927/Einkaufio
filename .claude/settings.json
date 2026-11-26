@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform import *)",
+      "Bash(terraform state *)",
+      "Bash(terraform force-unlock *)",
+      "Bash(aws *)",
+      "Bash(printenv *)",
+      "Bash(env)",
+      "Bash(git push --force*)",
+      "Bash(git -C * push --force*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.*)",
+      "Read(**/*.tfplan)",
+      "Read(**/*.pem)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-commit-check-stdin.sh\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}

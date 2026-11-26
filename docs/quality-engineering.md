@@ -115,7 +115,6 @@ A work item is **verified** only when:
 
 Passing tests do not prove absence of all defects. The claim is limited to the behaviors and environments covered by the evidence.
 
-
 ## 7. Enforcing architecture and monorepo boundaries
 
 The target is a monorepo with enforceable dependency direction, not merely a folder convention.
@@ -161,3 +160,11 @@ For Terraform changes, preserve:
 - Rollback/recovery steps, especially for stateful resources and data stores.
 
 Terraform plans are evidence of intended changes, not evidence that deployment succeeded. An apply is not evidence that the application works; smoke tests are still required.
+
+## 9. Agent workflow additions
+
+- Use root `AGENTS.md` as the concise entry point; keep detailed policy in this document and linked architecture/security documents.
+- `make verify` is the local CI-equivalent command; `make check` intentionally remains the faster backend/architecture/Terraform-format loop.
+- Each repository port contract should have reusable behavioral scenarios. Run the same scenarios against the in-memory fake and every production adapter. Cover authorization-before-existence-disclosure, fail-closed behavior, atomic expected-version comparison (including stale no-op rename), item/list version atomicity, item capacity/position assignment, and repeated-delete semantics.
+- Do not introduce a `VerifiedActor` marker until verified Cognito claims are represented at the API trust boundary. Its constructor must not be reachable from request DTOs or arbitrary strings.
+- Agent hooks and repository permission files are defense-in-depth only. CI, branch protection, code review and protected environments remain authoritative.
