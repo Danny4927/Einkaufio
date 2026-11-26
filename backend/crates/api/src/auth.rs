@@ -8,7 +8,7 @@ use std::{
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone, Debug)]
 pub struct CognitoConfig {
@@ -82,12 +82,15 @@ pub struct CognitoTokenVerifier {
     config: CognitoConfig,
     client: reqwest::Client,
     cache: Arc<RwLock<KeyCache>>,
+    refresh_lock: Arc<Mutex<()>>,
+    jwks_url: String,
 }
 
 #[derive(Default)]
 struct KeyCache {
     keys: HashMap<String, DecodingKey>,
     expires_at: u64,
+    last_refresh_at: Option<u64>,
 }
 
 impl CognitoTokenVerifier {
@@ -97,11 +100,21 @@ impl CognitoTokenVerifier {
             .build()
             .map_err(|_| AuthError::Unavailable)?;
 
+        let jwks_url = format!("{}/.well-known/jwks.json", config.issuer);
         Ok(Self {
             config,
             client,
             cache: Arc::new(RwLock::new(KeyCache::default())),
+            refresh_lock: Arc::new(Mutex::new(())),
+            jwks_url,
         })
+    }
+
+    #[cfg(test)]
+    fn new_with_jwks_url(config: CognitoConfig, jwks_url: String) -> Result<Self, AuthError> {
+        let mut verifier = Self::new(config)?;
+        verifier.jwks_url = jwks_url;
+        Ok(verifier)
     }
 
     async fn key_for(&self, kid: &str) -> Result<DecodingKey, AuthError> {
@@ -119,11 +132,25 @@ impl CognitoTokenVerifier {
             }
         }
 
+        // Serialize refreshes and re-check after acquiring the lock (single-flight).
+        let _refresh = self.refresh_lock.lock().await;
+        {
+            let cache = self.cache.read().await;
+            if cache.expires_at > now
+                && let Some(key) = cache.keys.get(kid)
+            {
+                return Ok(key.clone());
+            }
+            // Unknown kids are negatively cached by throttling refresh attempts globally.
+            if cache.last_refresh_at.is_some_and(|last| now.saturating_sub(last) < 30) {
+                return Err(AuthError::InvalidToken);
+            }
+        }
+
         // Never follow jku/x5u supplied by an untrusted token header.
-        let url = format!("{}/.well-known/jwks.json", self.config.issuer);
         let jwks: Jwks = self
             .client
-            .get(url)
+            .get(&self.jwks_url)
             .send()
             .await
             .map_err(|_| AuthError::Unavailable)?
@@ -151,6 +178,7 @@ impl CognitoTokenVerifier {
         let mut cache = self.cache.write().await;
         cache.keys = keys;
         cache.expires_at = now.saturating_add(300);
+        cache.last_refresh_at = Some(now);
         cache.keys.get(kid).cloned().ok_or(AuthError::InvalidToken)
     }
 
