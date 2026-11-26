@@ -1,7 +1,9 @@
 //! Outbound adapters implementing application-owned ports.
 //!
-//! Technology-specific persistence and AWS code belongs here, not in domain
-//! or application crates. Concrete production adapters will be added with their contracts.
+//! Test-only adapters and reusable contracts are available under `cfg(test)` or the
+//! explicit `test-support` feature; they are not part of the production library API.
 
+#[cfg(any(test, feature = "test-support"))]
 pub mod in_memory;
+#[cfg(any(test, feature = "test-support"))]
 pub mod repository_contracts;
