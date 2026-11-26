@@ -184,11 +184,11 @@ mod tests {
             assert_eq!(next_version, expected_version + 1);
         }
 
-        let list_id = list_id("capacity-list");
-        let items = repository.items_for_list(&list_id);
+        let capacity_id = list_id("capacity-list");
+        let items = repository.items_for_list(&capacity_id);
         assert_eq!(items.len(), ShoppingList::MAX_ACTIVE_ITEMS);
-        for (expected_position, item) in items.iter().enumerate() {
-            assert_eq!(item.position(), expected_position as u32);
+        for (expected_position, stored_item) in items.iter().enumerate() {
+            assert_eq!(stored_item.position(), expected_position as u32);
         }
 
         assert_eq!(
