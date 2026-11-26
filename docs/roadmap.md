@@ -25,7 +25,8 @@
   - Reuse: enable the adapters crate's `test-support` feature and invoke both contracts with a fresh `ShoppingListRepository`/`ShoppingItemRepository` pair.
   - Limitation: the in-memory adapter is single-threaded test support (`RefCell`, therefore `!Sync`); it does not prove durable storage or production concurrency behavior. DynamoDB must add transaction/conditional-write integration tests.
 
-- [x] **HTTP transport foundation:** Axum router, public health endpoint, personal-list route DTOs and fail-closed authentication gate.\n- [ ] **Cognito JWT authentication (in progress in PR #12):** verify RS256 access tokens against issuer-derived Cognito JWKS; validate issuer, expiry/not-before, `token_use=access`, app `client_id` and `sub`; inject a crate-private verified actor only after successful verification. Missing configuration and JWKS failures remain fail-closed.
+- [x] **HTTP transport foundation:** Axum router, public health endpoint, personal-list route DTOs and fail-closed authentication gate.
+- [ ] **Cognito JWT authentication (in progress in PR #12):** verify RS256 access tokens against issuer-derived Cognito JWKS; validate issuer, expiry/not-before, `token_use=access`, app `client_id` and `sub`; inject a crate-private verified actor only after successful verification. Missing configuration and JWKS failures remain fail-closed.
 - [x] **Verified actor boundary type:** `VerifiedActor` can only be created inside the API crate from a verifier-produced principal; request DTOs cannot supply an owner ID.
   - Acceptance: request DTOs cannot provide owner/actor identity; no public constructor/from-string conversion exists for untrusted input; application use cases receive the verified actor explicitly.
   - Tests: valid claims produce the actor; missing/invalid/expired/wrong-audience tokens fail before use-case invocation; client-supplied owner/actor fields are ignored or rejected.
