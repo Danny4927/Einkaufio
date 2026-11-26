@@ -10,7 +10,7 @@
 ## Authentication
 
 - Require a valid Cognito access token for all application API routes except minimal health.
-- Validate JWT signature using Cognito JWKS, issuer, expiry, token use and configured client identifiers.
+- Validate JWT signature with RS256 against the issuer-derived Cognito JWKS endpoint; never follow `jku`/`x5u` from token headers.\n- Validate issuer, expiry/not-before, `token_use=access`, configured app `client_id`, and non-empty `sub`.\n- Cache JWKS briefly and refresh on key-cache miss to support signing-key rotation; fail closed if Cognito/JWKS is unavailable.
 - Cache JWKS with key-rotation support.
 - Derive caller ID from verified `sub`; never authorize based on user IDs in request bodies.
 - Do not embed Cognito app-client secrets in browser or Android binaries.
