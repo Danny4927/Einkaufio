@@ -449,3 +449,40 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }
+
+    #[tokio::test]
+    async fn authentication_middleware_rejects_missing_and_malformed_bearer_tokens() {
+        let verifier = CognitoTokenVerifier::new_with_jwks_url(
+            crate::auth::CognitoConfig {
+                issuer: "https://issuer.example.test/pool".to_owned(),
+                app_client_id: "client".to_owned(),
+            },
+            "http://127.0.0.1:1/.well-known/jwks.json".to_owned(),
+        )
+        .unwrap();
+        let state = ApiState::new(
+            Arc::new(TestLists::default()),
+            Arc::new(TestIds),
+        )
+        .with_authenticator(verifier);
+        let app = router(state);
+
+        for authorization in [None, Some("Bearer not-a-jwt")] {
+            let mut builder = Request::builder().uri("/api/lists");
+            if let Some(value) = authorization {
+                builder = builder.header(axum::http::header::AUTHORIZATION, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(builder.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response.headers().get(axum::http::header::WWW_AUTHENTICATE).unwrap(),
+                "Bearer"
+            );
+        }
+    }
+
+
