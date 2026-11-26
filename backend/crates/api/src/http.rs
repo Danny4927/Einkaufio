@@ -30,7 +30,11 @@ impl ApiState {
         lists: Arc<dyn ShoppingListRepository + Send + Sync>,
         ids: Arc<dyn ListIdGenerator + Send + Sync>,
     ) -> Self {
-        Self { lists, ids, verifier: None }
+        Self {
+            lists,
+            ids,
+            verifier: None,
+        }
     }
 
     pub fn with_authenticator(mut self, verifier: CognitoTokenVerifier) -> Self {
@@ -40,13 +44,18 @@ impl ApiState {
 }
 
 pub fn router(state: ApiState) -> Router {
-    let protected = protected_routes()
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_verified_actor));
+    let protected = protected_routes().route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        require_verified_actor,
+    ));
     build_router(state, protected)
 }
 
 fn protected_routes() -> Router<ApiState> {
-    Router::new().route("/lists", get(list_personal_lists).post(create_personal_list))
+    Router::new().route(
+        "/lists",
+        get(list_personal_lists).post(create_personal_list),
+    )
 }
 
 fn build_router(state: ApiState, protected: Router<ApiState>) -> Router {
@@ -88,7 +97,11 @@ impl FromRequestParts<ApiState> for VerifiedActor {
         parts: &mut Parts,
         _state: &ApiState,
     ) -> Result<Self, Self::Rejection> {
-        parts.extensions.get::<Self>().cloned().ok_or(StatusCode::UNAUTHORIZED)
+        parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .ok_or(StatusCode::UNAUTHORIZED)
     }
 }
 
@@ -114,7 +127,9 @@ async fn require_verified_actor(
 
     match verifier.verify(token).await {
         Ok(principal) => {
-            request.extensions_mut().insert(VerifiedActor::from_verified_claims(principal.subject));
+            request
+                .extensions_mut()
+                .insert(VerifiedActor::from_verified_claims(principal.subject));
             next.run(request).await
         }
         Err(AuthError::InvalidToken) => ApiError::Unauthorized.into_response(),
@@ -158,7 +173,9 @@ async fn list_personal_lists(
 ) -> Result<Json<ListPageResponse>, ApiError> {
     let use_case = ListPersonalLists::new(state.lists.as_ref());
     let lists = use_case
-        .execute(ListPersonalListsQuery { owner_id: actor.owner_id().to_owned() })
+        .execute(ListPersonalListsQuery {
+            owner_id: actor.owner_id().to_owned(),
+        })
         .map_err(ApiError::from)?;
 
     Ok(Json(ListPageResponse {
@@ -196,7 +213,9 @@ struct ErrorDetail {
 
 impl ErrorResponse {
     fn new(code: &'static str, message: &'static str) -> Self {
-        Self { error: ErrorDetail { code, message } }
+        Self {
+            error: ErrorDetail { code, message },
+        }
     }
 }
 
@@ -213,9 +232,12 @@ impl From<CreatePersonalListError> for ApiError {
     fn from(error: CreatePersonalListError) -> Self {
         match error {
             CreatePersonalListError::InvalidName(_) => Self::InvalidInput,
-            CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => Self::Internal,
+            CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => {
+                Self::Internal
+            }
             CreatePersonalListError::PersistenceUnavailable => Self::Unavailable,
-            CreatePersonalListError::InvalidGeneratedId(_) | CreatePersonalListError::RepositoryInvariantViolation => Self::Internal,
+            CreatePersonalListError::InvalidGeneratedId(_)
+            | CreatePersonalListError::RepositoryInvariantViolation => Self::Internal,
         }
     }
 }
@@ -223,7 +245,8 @@ impl From<CreatePersonalListError> for ApiError {
 impl From<ListPersonalListsError> for ApiError {
     fn from(error: ListPersonalListsError) -> Self {
         match error {
-            ListPersonalListsError::InvalidOwner(_) | ListPersonalListsError::RepositoryInvariantViolation => Self::Internal,
+            ListPersonalListsError::InvalidOwner(_)
+            | ListPersonalListsError::RepositoryInvariantViolation => Self::Internal,
             ListPersonalListsError::PersistenceUnavailable => Self::Unavailable,
         }
     }
@@ -291,7 +314,9 @@ mod tests {
     struct TestIds;
 
     impl ListIdGenerator for TestIds {
-        fn generate(&self) -> String { "test-list-id".to_owned() }
+        fn generate(&self) -> String {
+            "test-list-id".to_owned()
+        }
     }
 
     fn test_router() -> Router {
@@ -324,9 +349,17 @@ mod tests {
 
     #[tokio::test]
     async fn health_is_public() {
-        let app = router(ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds)));
+        let app = router(ApiState::new(
+            Arc::new(TestLists::default()),
+            Arc::new(TestIds),
+        ));
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -336,10 +369,16 @@ mod tests {
 
     #[tokio::test]
     async fn protected_routes_fail_closed_without_authentication_configuration() {
-        let app = router(ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds)));
+        let app = router(ApiState::new(
+            Arc::new(TestLists::default()),
+            Arc::new(TestIds),
+        ));
         for (method, body) in [
             (Method::GET, Body::empty()),
-            (Method::POST, Body::from(r#"{"name":"Groceries","ownerId":"attacker"}"#)),
+            (
+                Method::POST,
+                Body::from(r#"{"name":"Groceries","ownerId":"attacker"}"#),
+            ),
         ] {
             let response = app
                 .clone()
