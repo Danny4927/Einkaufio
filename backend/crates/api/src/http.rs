@@ -3,7 +3,7 @@
 //! Authentication is intentionally fail-closed until Cognito JWT verification is provided.
 //! No caller-controlled identity is accepted by these handlers.
 
-use std::sync::Arc;
+use std::sync::Arc;\n\nuse crate::auth::{AuthError, CognitoTokenVerifier};
 
 use axum::{
     Json, Router,
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct ApiState {
-    lists: Arc<dyn ShoppingListRepository + Send + Sync>,
+    lists: Arc<dyn ShoppingListRepository + Send + Sync>,\n    verifier: Option<Arc<CognitoTokenVerifier>>,
     ids: Arc<dyn ListIdGenerator + Send + Sync>,
 }
 
@@ -31,14 +31,14 @@ impl ApiState {
         lists: Arc<dyn ShoppingListRepository + Send + Sync>,
         ids: Arc<dyn ListIdGenerator + Send + Sync>,
     ) -> Self {
-        Self { lists, ids }
+        Self { lists, ids, verifier: None }
     }
 }
 
 pub fn router(state: ApiState) -> Router {
     build_router(
         state,
-        protected_routes().route_layer(middleware::from_fn(require_verified_actor)),
+        protected_routes().route_layer(middleware::from_fn_with_state(state.clone(), require_verified_actor)),
     )
 }
 
@@ -222,7 +222,7 @@ impl From<ListPersonalListsError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            Self::AuthenticationUnavailable => (
+            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::AuthenticationUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "authentication_unavailable",
                 "Authentication is not configured",
