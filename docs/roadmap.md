@@ -25,6 +25,7 @@
   - Reuse: enable the adapters crate's `test-support` feature and invoke both contracts with a fresh `ShoppingListRepository`/`ShoppingItemRepository` pair.
   - Limitation: the in-memory adapter is single-threaded test support (`RefCell`, therefore `!Sync`); it does not prove durable storage or production concurrency behavior. DynamoDB must add transaction/conditional-write integration tests.
 
+- [ ] **HTTP transport foundation (in progress in PR):** Axum router, public health endpoint, personal-list route DTOs and fail-closed authentication gate. The routes intentionally return `503 authentication_unavailable` until Cognito JWT verification can supply a trusted principal; no client-provided owner ID is accepted.
 - [ ] **Verified actor at the authentication boundary:** introduce a type (e.g. `VerifiedActor`) that can only be created from successfully verified Cognito claims/principal data.
   - Acceptance: request DTOs cannot provide owner/actor identity; no public constructor/from-string conversion exists for untrusted input; application use cases receive the verified actor explicitly.
   - Tests: valid claims produce the actor; missing/invalid/expired/wrong-audience tokens fail before use-case invocation; client-supplied owner/actor fields are ignored or rejected.
