@@ -6,7 +6,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
@@ -20,8 +20,10 @@ impl CognitoConfig {
     /// Derive the issuer only from trusted deployment configuration.
     pub fn from_env() -> Result<Self, AuthError> {
         let region = std::env::var("AWS_REGION").map_err(|_| AuthError::Unavailable)?;
-        let pool = std::env::var("COGNITO_USER_POOL_ID").map_err(|_| AuthError::Unavailable)?;
-        let client = std::env::var("COGNITO_APP_CLIENT_ID").map_err(|_| AuthError::Unavailable)?;
+        let pool =
+            std::env::var("COGNITO_USER_POOL_ID").map_err(|_| AuthError::Unavailable)?;
+        let client =
+            std::env::var("COGNITO_APP_CLIENT_ID").map_err(|_| AuthError::Unavailable)?;
 
         if region.trim().is_empty()
             || pool.trim().is_empty()
@@ -208,7 +210,11 @@ mod tests {
             app_client_id: "client".into(),
         };
 
-        assert!(config.issuer.starts_with("https://cognito-idp.eu-central-1.amazonaws.com/"));
+        assert!(
+            config
+                .issuer
+                .starts_with("https://cognito-idp.eu-central-1.amazonaws.com/")
+        );
         assert_eq!(config.app_client_id, "client");
     }
 
