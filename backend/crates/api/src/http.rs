@@ -3,8 +3,9 @@
 //! Authentication is enforced with Cognito access-token verification.
 //! No caller-controlled identity is accepted by these handlers.
 
-use std::sync::Arc;\n\nuse crate::auth::{AuthError, CognitoTokenVerifier};
+use std::sync::Arc;
 
+use crate::auth::{AuthError, CognitoTokenVerifier};
 use axum::{
     Json, Router,
     extract::{FromRequestParts, State},
@@ -22,8 +23,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct ApiState {
-    lists: Arc<dyn ShoppingListRepository + Send + Sync>,\n    verifier: Option<Arc<CognitoTokenVerifier>>,
+    lists: Arc<dyn ShoppingListRepository + Send + Sync>,
     ids: Arc<dyn ListIdGenerator + Send + Sync>,
+    verifier: Option<Arc<CognitoTokenVerifier>>,
 }
 
 impl ApiState {
@@ -41,10 +43,9 @@ impl ApiState {
 }
 
 pub fn router(state: ApiState) -> Router {
-    build_router(
-        state,
-        protected_routes().route_layer(middleware::from_fn_with_state(state.clone(), require_verified_actor)),
-    )
+    let protected = protected_routes()
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_verified_actor));
+    build_router(state, protected)
 }
 
 fn protected_routes() -> Router<ApiState> {
@@ -77,8 +78,6 @@ pub(crate) struct VerifiedActor {
 }
 
 impl VerifiedActor {
-    /// The only production constructor is crate-private so transport callers cannot forge identity.
-    #[allow(dead_code)] // Wired by the Cognito verifier in the authentication milestone.
     pub(crate) fn from_verified_claims(owner_id: String) -> Self {
         Self { owner_id }
     }
@@ -99,7 +98,7 @@ impl FromRequestParts<ApiState> for VerifiedActor {
             .extensions
             .get::<Self>()
             .cloned()
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)
+            .ok_or(StatusCode::UNAUTHORIZED)
     }
 }
 
@@ -111,13 +110,17 @@ async fn require_verified_actor(
     let Some(verifier) = state.verifier else {
         return ApiError::AuthenticationUnavailable.into_response();
     };
-    let token = match request.headers().get(axum::http::header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .filter(|t| !t.is_empty()) {
+    let token = match request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.is_empty())
+    {
         Some(token) => token,
         None => return ApiError::Unauthorized.into_response(),
     };
+
     match verifier.verify(token).await {
         Ok(principal) => {
             request.extensions_mut().insert(VerifiedActor::from_verified_claims(principal.subject));
@@ -202,9 +205,7 @@ struct ErrorDetail {
 
 impl ErrorResponse {
     fn new(code: &'static str, message: &'static str) -> Self {
-        Self {
-            error: ErrorDetail { code, message },
-        }
+        Self { error: ErrorDetail { code, message } }
     }
 }
 
@@ -221,11 +222,7 @@ impl From<CreatePersonalListError> for ApiError {
     fn from(error: CreatePersonalListError) -> Self {
         match error {
             CreatePersonalListError::InvalidName(_) => Self::InvalidInput,
-            // Owner identity and generated list IDs are server-controlled. Failures here
-            // indicate an authentication/infrastructure invariant, not a client conflict.
-            CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => {
-                Self::Internal
-            }
+            CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => Self::Internal,
             CreatePersonalListError::PersistenceUnavailable => Self::Unavailable,
             CreatePersonalListError::InvalidGeneratedId(_)
             | CreatePersonalListError::RepositoryInvariantViolation => Self::Internal,
@@ -246,7 +243,12 @@ impl From<ListPersonalListsError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::Unauthorized => (\n                StatusCode::UNAUTHORIZED,\n                "unauthorized",\n                "A valid Cognito access token is required",\n            ),\n            Self::AuthenticationUnavailable => (
+            Self::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "A valid Cognito access token is required",
+            ),
+            Self::AuthenticationUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "authentication_unavailable",
                 "Authentication is not configured",
@@ -339,46 +341,28 @@ mod tests {
             Arc::new(TestLists::default()),
             Arc::new(TestIds),
         ));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = app.oneshot(
+            Request::builder().uri("/health").body(Body::empty()).unwrap(),
+        ).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..], br#"{"status":"ok"}"#);
     }
 
     #[tokio::test]
-    async fn personal_list_routes_fail_closed_without_verified_authentication() {
+    async fn personal_list_routes_fail_closed_without_authentication_configuration() {
         let app = router(ApiState::new(
             Arc::new(TestLists::default()),
             Arc::new(TestIds),
         ));
-        for (method, uri, body) in [
-            (Method::GET, "/api/lists", Body::empty()),
-            (
-                Method::POST,
-                "/api/lists",
-                Body::from(r#"{"name":"Einkauf","ownerId":"attacker"}"#),
-            ),
+        for (method, body) in [
+            (Method::GET, Body::empty()),
+            (Method::POST, Body::from(r#"{"name":"Einkauf","ownerId":"attacker"}"#)),
         ] {
-            let response = app
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method(method)
-                        .uri(uri)
-                        .header("content-type", "application/json")
-                        .body(body)
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+            let response = app.clone().oneshot(
+                Request::builder().method(method).uri("/api/lists")
+                    .header("content-type", "application/json").body(body).unwrap(),
+            ).await.unwrap();
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
             let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -387,7 +371,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_list_returns_created_for_verified_actor() {
+    async fn create_list_returns_created_for_injected_test_actor() {
         let response = send_json(test_router(), Method::POST, r#"{"name":"Wocheneinkauf"}"#).await;
         assert_eq!(response.status(), StatusCode::CREATED);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -403,13 +387,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_list_returns_unprocessable_entity_for_unknown_fields() {
+    async fn create_list_rejects_unknown_owner_field() {
         let response = send_json(
             test_router(),
             Method::POST,
             r#"{"name":"Wocheneinkauf","ownerId":"attacker"}"#,
-        )
-        .await;
+        ).await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }
