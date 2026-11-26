@@ -22,6 +22,9 @@ impl CognitoConfig {
         let region = std::env::var("AWS_REGION").map_err(|_| AuthError::Unavailable)?;
         let pool = std::env::var("COGNITO_USER_POOL_ID").map_err(|_| AuthError::Unavailable)?;
         let client = std::env::var("COGNITO_APP_CLIENT_ID").map_err(|_| AuthError::Unavailable)?;
+        let region = region.trim().to_owned();
+        let pool = pool.trim().to_owned();
+        let client = client.trim().to_owned();
 
         if region.trim().is_empty()
             || pool.trim().is_empty()
