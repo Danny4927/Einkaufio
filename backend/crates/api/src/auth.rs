@@ -114,7 +114,10 @@ impl CognitoTokenVerifier {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_jwks_url(config: CognitoConfig, jwks_url: String) -> Result<Self, AuthError> {
+    pub(crate) fn new_with_jwks_url(
+        config: CognitoConfig,
+        jwks_url: String,
+    ) -> Result<Self, AuthError> {
         let mut verifier = Self::new(config)?;
         verifier.jwks_url = jwks_url;
         Ok(verifier)
@@ -145,7 +148,10 @@ impl CognitoTokenVerifier {
                 return Ok(key.clone());
             }
             // Unknown kids are negatively cached by throttling refresh attempts globally.
-            if cache.last_refresh_at.is_some_and(|last| now.saturating_sub(last) < 30) {
+            if cache
+                .last_refresh_at
+                .is_some_and(|last| now.saturating_sub(last) < 30)
+            {
                 return Err(AuthError::InvalidToken);
             }
         }
@@ -264,7 +270,11 @@ mod jwks_integration_tests {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use jsonwebtoken::{EncodingKey, Header, encode};
     use rand::rngs::OsRng;
-    use rsa::{RsaPrivateKey, pkcs8::{EncodePrivateKey, LineEnding}, traits::PublicKeyParts};
+    use rsa::{
+        RsaPrivateKey,
+        pkcs8::{EncodePrivateKey, LineEnding},
+        traits::PublicKeyParts,
+    };
     use serde_json::{Value, json};
     use tokio::{net::TcpListener, sync::RwLock, task::JoinHandle};
 
@@ -298,13 +308,23 @@ mod jwks_integration_tests {
             app_client_id: "expected-client".into(),
         };
         let verifier = CognitoTokenVerifier::new_with_jwks_url(
-            config, format!("http://{address}/.well-known/jwks.json")
-        ).unwrap();
-        Fixture { verifier, document, private_pem, server }
+            config,
+            format!("http://{address}/.well-known/jwks.json"),
+        )
+        .unwrap();
+        Fixture {
+            verifier,
+            document,
+            private_pem,
+            server,
+        }
     }
 
     fn claims(overrides: Value) -> Value {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let mut value = json!({
             "sub":"user-123","iss":"https://issuer.example.test/pool",
             "exp":now+300,"iat":now,"token_use":"access","client_id":"expected-client"
@@ -318,7 +338,12 @@ mod jwks_integration_tests {
     fn signed_token(pem: &str, kid: &str, claims: Value) -> String {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(kid.into());
-        encode(&header, &claims, &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap()).unwrap()
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -336,7 +361,10 @@ mod jwks_integration_tests {
         let mut parts = valid.split('.').map(str::to_owned).collect::<Vec<_>>();
         let replacement = if parts[2].starts_with('A') { "B" } else { "A" };
         parts[2].replace_range(..1, replacement);
-        assert_eq!(f.verifier.verify(&parts.join(".")).await, Err(AuthError::InvalidToken));
+        assert_eq!(
+            f.verifier.verify(&parts.join(".")).await,
+            Err(AuthError::InvalidToken)
+        );
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let invalid = [
@@ -349,7 +377,10 @@ mod jwks_integration_tests {
         ];
         for overrides in invalid {
             let token = signed_token(&f.private_pem, "key-1", claims(overrides));
-            assert_eq!(f.verifier.verify(&token).await, Err(AuthError::InvalidToken));
+            assert_eq!(
+                f.verifier.verify(&token).await,
+                Err(AuthError::InvalidToken)
+            );
         }
         f.server.abort();
     }
@@ -369,7 +400,10 @@ mod jwks_integration_tests {
         drop(document);
 
         let rotated = signed_token(&f.private_pem, "key-2", claims(json!({})));
-        assert_eq!(f.verifier.verify(&rotated).await.unwrap().subject, "user-123");
+        assert_eq!(
+            f.verifier.verify(&rotated).await.unwrap().subject,
+            "user-123"
+        );
         f.server.abort();
     }
 
@@ -380,8 +414,10 @@ mod jwks_integration_tests {
             app_client_id: "expected-client".into(),
         };
         let verifier = CognitoTokenVerifier::new_with_jwks_url(
-            config, "http://127.0.0.1:1/.well-known/jwks.json".into()
-        ).unwrap();
+            config,
+            "http://127.0.0.1:1/.well-known/jwks.json".into(),
+        )
+        .unwrap();
         let f = fixture().await;
         let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
         assert_eq!(verifier.verify(&token).await, Err(AuthError::Unavailable));
