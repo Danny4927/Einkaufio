@@ -157,7 +157,7 @@ pub fn run_shopping_item_contract(
     let other = user("contract-item-other");
     let item_list = list("contract-item-list", "contract-item-owner", "Items");
     lists
-        .create_personal(list.clone())
+        .create_personal(item_list.clone())
         .expect("provision contract list");
 
     assert_eq!(
