@@ -468,11 +468,8 @@ mod tests {
             "http://127.0.0.1:1/.well-known/jwks.json".to_owned(),
         )
         .unwrap();
-        let state = ApiState::new(
-            Arc::new(TestLists::default()),
-            Arc::new(TestIds),
-        )
-        .with_authenticator(verifier);
+        let state = ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds))
+            .with_authenticator(verifier);
         let app = router(state);
 
         for authorization in [None, Some("Bearer not-a-jwt")] {
@@ -487,7 +484,10 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
             assert_eq!(
-                response.headers().get(axum::http::header::WWW_AUTHENTICATE).unwrap(),
+                response
+                    .headers()
+                    .get(axum::http::header::WWW_AUTHENTICATE)
+                    .unwrap(),
                 "Bearer"
             );
         }
