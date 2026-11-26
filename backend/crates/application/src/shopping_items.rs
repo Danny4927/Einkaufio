@@ -1,8 +1,8 @@
 //! Application use cases for shopping-list item mutations.
 
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ListId, ShoppingItem,
-    UserId,
+    AggregateVersion, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ListId,
+    ShoppingItem, UserId,
 };
 
 use crate::ports::{ItemIdGenerator, RepositoryError, ShoppingItemRepository};
@@ -172,12 +172,7 @@ impl<'a> DeleteShoppingItem<'a> {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
         self.repository
-            .delete_item(
-                &actor,
-                &list_id,
-                &item_id,
-                command.expected_item_version,
-            )
+            .delete_item(&actor, &list_id, &item_id, command.expected_item_version)
             .map(|version| version.as_u64())
             .map_err(map_repository_error)
     }
@@ -237,7 +232,11 @@ mod tests {
                 expected_version.as_u64(),
                 item,
             ));
-            Ok(AggregateVersion::try_new(self.list_version_after_mutation.max(expected_version.as_u64() + 1)).unwrap())
+            Ok(AggregateVersion::try_new(
+                self.list_version_after_mutation
+                    .max(expected_version.as_u64() + 1),
+            )
+            .unwrap())
         }
 
         fn set_item_checked(
@@ -272,7 +271,10 @@ mod tests {
             // returned list version is not accidentally read from the item version.
             Ok((
                 item,
-                AggregateVersion::try_new(self.list_version_after_mutation.max(expected_version + 10)).unwrap(),
+                AggregateVersion::try_new(
+                    self.list_version_after_mutation.max(expected_version + 10),
+                )
+                .unwrap(),
             ))
         }
 
@@ -292,7 +294,10 @@ mod tests {
                 item_id.clone(),
                 expected_version,
             ));
-            Ok(AggregateVersion::try_new(self.list_version_after_mutation.max(expected_version + 10)).unwrap())
+            Ok(AggregateVersion::try_new(
+                self.list_version_after_mutation.max(expected_version + 10),
+            )
+            .unwrap())
         }
     }
 
