@@ -6,7 +6,7 @@ use crate::auth::{AuthError, CognitoTokenVerifier};
 use axum::{
     Json, Router,
     extract::{FromRequestParts, State},
-    http::{request::Parts, StatusCode},
+    http::{StatusCode, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
