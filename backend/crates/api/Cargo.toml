@@ -6,7 +6,6 @@ publish = false
 
 [dependencies]
 axum = "0.8"
-einkaufio-adapters = { path = "../adapters" }
 einkaufio-application = { path = "../application" }
 serde = { version = "1", features = ["derive"] }
 
