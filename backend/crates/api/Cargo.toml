@@ -5,5 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
+axum = "0.8"
 einkaufio-adapters = { path = "../adapters" }
 einkaufio-application = { path = "../application" }
+einkaufio-domain = { path = "../domain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
