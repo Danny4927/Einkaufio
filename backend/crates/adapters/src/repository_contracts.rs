@@ -170,11 +170,13 @@ pub fn run_shopping_item_contract(
     );
 
     // Capacity and repository-assigned unique positions are part of the shared port contract.
+    let capacity_list = list("contract-capacity-list", "contract-item-owner", "Capacity");
+    lists.create_personal(capacity_list.clone()).unwrap();
     for index in 0..ShoppingList::MAX_ACTIVE_ITEMS {
         let expected = version(index as u64 + 1);
         let next = items.add_item(
             &owner,
-            list.id(),
+            capacity_list.id(),
             expected,
             item(&format!("capacity-item-{index}"), "contract-item-owner", 42),
         ).unwrap();
@@ -183,18 +185,18 @@ pub fn run_shopping_item_contract(
     assert_eq!(
         items.add_item(
             &owner,
-            list.id(),
-            version(105),
+            capacity_list.id(),
+            version(101),
             item("capacity-overflow", "contract-item-owner", 0)
         ),
         Err(RepositoryError::ItemLimitReached)
     );
-    let stored = items.list_items(&owner, list.id()).unwrap();
+    let stored = items.list_items(&owner, capacity_list.id()).unwrap();
     assert_eq!(stored.len(), ShoppingList::MAX_ACTIVE_ITEMS);
     let positions: Vec<_> = stored.iter().map(ShoppingItem::position).collect();
     assert_eq!(positions, (0..ShoppingList::MAX_ACTIVE_ITEMS as u32).collect::<Vec<_>>());
     assert_eq!(
-        items.list_items(&other, list.id()),
+        items.list_items(&other, capacity_list.id()),
         Err(RepositoryError::NotFound)
     );
 }
