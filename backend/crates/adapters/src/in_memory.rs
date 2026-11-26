@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use einkaufio_application::{RepositoryError, ShoppingItemRepository, ShoppingListRepository};
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ListId, ListName,
+    AggregateVersion, ItemId, ListId, ListName,
     ShoppingItem, ShoppingList, UserId,
 };
 
@@ -30,17 +30,6 @@ impl InMemoryRepository {
         Self::default()
     }
 
-    pub fn items_for_list(&self, list_id: &ListId) -> Vec<ShoppingItem> {
-        let state = self.state.borrow();
-        let mut items: Vec<_> = state
-            .items
-            .iter()
-            .filter(|((candidate, _), _)| candidate == list_id)
-            .map(|(_, item)| item.clone())
-            .collect();
-        items.sort_by_key(ShoppingItem::position);
-        items
-    }
 
     fn authorized_list<'a>(
         state: &'a mut State,
@@ -53,15 +42,7 @@ impl InMemoryRepository {
         }
     }
 
-    fn increment_list_version(state: &mut State, list_id: &ListId) -> Result<u64, RepositoryError> {
-        let list = state
-            .lists
-            .get_mut(list_id)
-            .ok_or(RepositoryError::NotFound)?;
-        list.record_item_mutation()
-            .map_err(|_| RepositoryError::VersionExhausted)?;
-        Ok(list.version())
-    }
+
 }
 
 impl ShoppingListRepository for InMemoryRepository {
