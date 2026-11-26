@@ -1,7 +1,7 @@
-//! In-memory reference adapter for repository contract tests.
+//! In-memory reference adapter used by the repository contract tests.
 //!
-//! This adapter is intentionally not a production persistence implementation. It provides
-//! deterministic semantics against which future adapters can run the same contract suite.
+//! This adapter is deliberately small and deterministic. It models the repository port
+//! guarantees without claiming to provide durable persistence or production concurrency.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ impl InMemoryRepository {
         items
     }
 
-    fn owned_list<'a>(
+    fn authorized_list<'a>(
         state: &'a mut State,
         actor_id: &UserId,
         list_id: &ListId,
@@ -48,6 +48,15 @@ impl InMemoryRepository {
             Some(list) if list.owner_id() == actor_id => Ok(list),
             _ => Err(RepositoryError::NotFound),
         }
+    }
+
+    fn increment_list_version(
+        state: &mut State,
+        list_id: &ListId,
+    ) -> Result<u64, RepositoryError> {
+        let list = state.lists.get_mut(list_id).ok_or(RepositoryError::NotFound)?;
+        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+        Ok(list.version())
     }
 }
 
@@ -61,13 +70,16 @@ impl ShoppingListRepository for InMemoryRepository {
         Ok(())
     }
 
-    fn list_personal_for_owner(&self, owner_id: &UserId) -> Result<Vec<ShoppingList>, RepositoryError> {
+    fn list_personal_for_owner(
+        &self,
+        owner_id: &UserId,
+    ) -> Result<Vec<ShoppingList>, RepositoryError> {
         let state = self.state.borrow();
         let mut lists: Vec<_> = state.lists.values()
             .filter(|list| list.owner_id() == owner_id)
             .cloned()
             .collect();
-        lists.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
+        lists.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
         Ok(lists)
     }
 
@@ -79,7 +91,7 @@ impl ShoppingListRepository for InMemoryRepository {
         name: ListName,
     ) -> Result<ShoppingList, RepositoryError> {
         let mut state = self.state.borrow_mut();
-        let list = Self::owned_list(&mut state, actor_id, list_id)?;
+        let list = Self::authorized_list(&mut state, actor_id, list_id)?;
         if list.aggregate_version() != expected_version {
             return Err(RepositoryError::Conflict);
         }
@@ -94,7 +106,7 @@ impl ShoppingListRepository for InMemoryRepository {
         expected_version: AggregateVersion,
     ) -> Result<(), RepositoryError> {
         let mut state = self.state.borrow_mut();
-        let list = Self::owned_list(&mut state, actor_id, list_id)?;
+        let list = Self::authorized_list(&mut state, actor_id, list_id)?;
         if list.aggregate_version() != expected_version {
             return Err(RepositoryError::Conflict);
         }
@@ -116,7 +128,7 @@ impl ShoppingItemRepository for InMemoryRepository {
         let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
         let mut state = self.state.borrow_mut();
 
-        // Authorize before disclosing list version, item capacity or item existence.
+        // Check access before exposing list revision, capacity or item existence.
         let stored_list = state.lists.get(&list_id).ok_or(RepositoryError::NotFound)?;
         if stored_list.owner_id() != actor_id {
             return Err(RepositoryError::NotFound);
@@ -124,7 +136,10 @@ impl ShoppingItemRepository for InMemoryRepository {
         if stored_list.version() != expected_list_version {
             return Err(RepositoryError::Conflict);
         }
-        let active_count = state.items.keys().filter(|(candidate, _)| candidate == &list_id).count();
+
+        let active_count = state.items.keys()
+            .filter(|(candidate, _)| candidate == &list_id)
+            .count();
         if active_count >= ShoppingList::MAX_ACTIVE_ITEMS {
             return Err(RepositoryError::ItemLimitReached);
         }
@@ -138,18 +153,22 @@ impl ShoppingItemRepository for InMemoryRepository {
         let assigned = ShoppingItem::new(
             item.id().clone(),
             ItemName::try_new(item.name().as_str()).map_err(|_| RepositoryError::Unavailable)?,
-            item.quantity().map(|v| ItemQuantity::try_new(v.as_str()).map_err(|_| RepositoryError::Unavailable)).transpose()?,
-            item.unit().map(|v| ItemUnit::try_new(v.as_str()).map_err(|_| RepositoryError::Unavailable)).transpose()?,
-            item.note().map(|v| ItemNote::try_new(v.as_str()).map_err(|_| RepositoryError::Unavailable)).transpose()?,
+            item.quantity()
+                .map(|value| ItemQuantity::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .transpose()?,
+            item.unit()
+                .map(|value| ItemUnit::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .transpose()?,
+            item.note()
+                .map(|value| ItemNote::try_new(value.as_str()).map_err(|_| RepositoryError::Unavailable))
+                .transpose()?,
             position,
             actor_id.clone(),
         );
 
-        // All validation is complete. The parent revision and item insert are committed
-        // under one exclusive state borrow, modeling the port's atomicity requirement.
-        let list = state.lists.get_mut(&list_id).ok_or(RepositoryError::NotFound)?;
-        list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
-        let next_list_version = list.version();
+        // One exclusive in-memory transaction: advance the parent aggregate and insert the
+        // item only after all validations have succeeded.
+        let next_list_version = Self::increment_list_version(&mut state, &list_id)?;
         state.items.insert(key, assigned);
         state.next_positions.insert(list_id, position.saturating_add(1));
         Ok(next_list_version)
@@ -165,9 +184,8 @@ impl ShoppingItemRepository for InMemoryRepository {
     ) -> Result<(ShoppingItem, u64), RepositoryError> {
         let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
         let mut state = self.state.borrow_mut();
+        Self::authorized_list(&mut state, actor_id, &list_id)?;
 
-        // Authorization first; only then may the adapter disclose item existence/version.
-        Self::owned_list(&mut state, actor_id, &list_id)?;
         let key = (list_id.clone(), item_id.clone());
         let stored = state.items.get(&key).ok_or(RepositoryError::NotFound)?;
         if stored.version() != expected_item_version {
@@ -176,12 +194,24 @@ impl ShoppingItemRepository for InMemoryRepository {
 
         let mut updated = stored.clone();
         let changed = updated.set_checked(checked);
-        if changed {
+        let list_version = if changed {
+            // Validate the aggregate transition before storing either changed record.
+            let next = state.lists.get(&list_id)
+                .ok_or(RepositoryError::NotFound)?
+                .aggregate_version()
+                .checked_next()
+                .map_err(|_| RepositoryError::VersionExhausted)?;
+            let item_version = updated.version();
+            let version = next.as_u64();
             let list = state.lists.get_mut(&list_id).ok_or(RepositoryError::NotFound)?;
             list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
+            debug_assert_eq!(list.version(), version);
+            debug_assert_eq!(updated.version(), item_version);
             state.items.insert(key, updated.clone());
-        }
-        let list_version = state.lists.get(&list_id).ok_or(RepositoryError::NotFound)?.version();
+            version
+        } else {
+            state.lists.get(&list_id).ok_or(RepositoryError::NotFound)?.version()
+        };
         Ok((updated, list_version))
     }
 
@@ -194,18 +224,23 @@ impl ShoppingItemRepository for InMemoryRepository {
     ) -> Result<u64, RepositoryError> {
         let list_id = ListId::try_new(list_id).map_err(|_| RepositoryError::NotFound)?;
         let mut state = self.state.borrow_mut();
+        Self::authorized_list(&mut state, actor_id, &list_id)?;
 
-        Self::owned_list(&mut state, actor_id, &list_id)?;
         let key = (list_id.clone(), item_id.clone());
         let stored = state.items.get(&key).ok_or(RepositoryError::NotFound)?;
         if stored.version() != expected_item_version {
             return Err(RepositoryError::Conflict);
         }
-        let _position = stored.position();
 
+        let next_list_version = state.lists.get(&list_id)
+            .ok_or(RepositoryError::NotFound)?
+            .aggregate_version()
+            .checked_next()
+            .map_err(|_| RepositoryError::VersionExhausted)?
+            .as_u64();
         let list = state.lists.get_mut(&list_id).ok_or(RepositoryError::NotFound)?;
         list.record_item_mutation().map_err(|_| RepositoryError::VersionExhausted)?;
-        let next_list_version = list.version();
+        debug_assert_eq!(list.version(), next_list_version);
         state.items.remove(&key);
         Ok(next_list_version)
     }
