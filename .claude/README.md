@@ -5,3 +5,7 @@ These permission rules are defense-in-depth, not a sandbox. They do not prevent 
 The project settings register the PreToolUse Bash hook. Claude Code sends JSON on stdin; the hook must parse tool_input.command with jq and run make check for git commit commands. Hook timeout is configured to 600 seconds. Verify it with /hooks and /status in the actual runtime and perform a real test commit in a disposable worktree. The repository script test is not an end-to-end Claude Code runtime test.
 
 The hook requires Bash, jq, Git and Make. Runtime project settings may not apply in all hosted/cloud sessions.
+
+## Tiered agent workflow
+
+`/ship <task>` (`.claude/skills/ship/SKILL.md`) plans, implements, verifies, reviews, applies feedback and opens a PR. It routes work to the subagents in `.claude/agents/`: `scout` (Haiku) for simple tasks, `implementer` (Opus, low effort) for standard steps, `implementer-deep` (Opus, high effort) for hard steps and as one-time escalation when a step is blocked or red, plus `planner` and `reviewer`. Escalation and round limits are enforced by the orchestrating session, not by the agents. Check with `/agents` that the `model` and `effort` frontmatter are honored by your Claude Code version.
