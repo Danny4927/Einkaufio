@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use einkaufio_application::{RepositoryError, ShoppingItemRepository, ShoppingListRepository};
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId,
+    AggregateVersion, ItemDetails, ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId,
 };
 
 #[derive(Default)]
@@ -183,7 +183,47 @@ impl ShoppingItemRepository for InMemoryRepository {
             return Err(RepositoryError::Conflict);
         }
         let mut updated = stored.clone();
-        if updated.set_checked(checked) {
+        if updated
+            .set_checked(checked)
+            .map_err(|_| RepositoryError::VersionExhausted)?
+        {
+            let list = state
+                .lists
+                .get_mut(list_id)
+                .ok_or(RepositoryError::NotFound)?;
+            list.record_item_mutation()
+                .map_err(|_| RepositoryError::VersionExhausted)?;
+        }
+        let list_version = state
+            .lists
+            .get(list_id)
+            .ok_or(RepositoryError::NotFound)?
+            .aggregate_version();
+        state.items.insert(key, updated.clone());
+        Ok((updated, list_version))
+    }
+
+    fn update_item_details(
+        &self,
+        actor_id: &UserId,
+        list_id: &ListId,
+        item_id: &ItemId,
+        expected_item_version: u64,
+        details: ItemDetails,
+    ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+        let mut state = self.state.borrow_mut();
+        Self::authorized_list(&mut state, actor_id, list_id)?;
+
+        let key = (list_id.clone(), item_id.clone());
+        let stored = state.items.get(&key).ok_or(RepositoryError::NotFound)?;
+        if stored.version() != expected_item_version {
+            return Err(RepositoryError::Conflict);
+        }
+        let mut updated = stored.clone();
+        if updated
+            .update_details(details)
+            .map_err(|_| RepositoryError::VersionExhausted)?
+        {
             let list = state
                 .lists
                 .get_mut(list_id)

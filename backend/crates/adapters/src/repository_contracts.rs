@@ -5,7 +5,8 @@
 
 use einkaufio_application::{RepositoryError, ShoppingItemRepository, ShoppingListRepository};
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ItemName, ListId, ListName, ShoppingItem, ShoppingList, UserId,
+    AggregateVersion, ItemDetails, ItemId, ItemName, ItemNote, ListId, ListName, ShoppingItem,
+    ShoppingList, UserId,
 };
 
 fn user(value: &str) -> UserId {
@@ -236,20 +237,65 @@ pub fn run_shopping_item_contract(
     assert_eq!(unchecked.version(), 3);
     assert_eq!(list_version, version(4));
 
+    // Detail updates: authorize first, stale versions conflict even for no-ops, and only real
+    // changes advance item and list versions while preserving check state and position.
+    let edited = ItemDetails {
+        name: ItemName::try_new("Contract item edited").unwrap(),
+        quantity: None,
+        unit: None,
+        note: Some(ItemNote::try_new("contract note").unwrap()),
+    };
     assert_eq!(
-        items.delete_item(&owner, item_list.id(), &item_id, 2),
-        Err(RepositoryError::Conflict)
-    );
-    assert_eq!(
-        items.delete_item(&other, item_list.id(), &item_id, 3),
+        items.update_item_details(&other, item_list.id(), &item_id, 3, edited.clone()),
         Err(RepositoryError::NotFound)
     );
     assert_eq!(
-        items.delete_item(&owner, item_list.id(), &item_id, 3),
-        Ok(version(5))
+        items.update_item_details(
+            &owner,
+            item_list.id(),
+            &ItemId::try_new("missing-item").unwrap(),
+            1,
+            edited.clone()
+        ),
+        Err(RepositoryError::NotFound)
     );
+    let current_details = unchecked.details();
+    assert_eq!(
+        items.update_item_details(&owner, item_list.id(), &item_id, 2, current_details.clone()),
+        Err(RepositoryError::Conflict)
+    );
+    let (same, list_version) = items
+        .update_item_details(&owner, item_list.id(), &item_id, 3, current_details)
+        .unwrap();
+    assert_eq!(same.version(), 3);
+    assert_eq!(list_version, version(4));
+    let (updated, list_version) = items
+        .update_item_details(&owner, item_list.id(), &item_id, 3, edited.clone())
+        .unwrap();
+    assert_eq!(updated.details(), edited);
+    assert_eq!(updated.version(), 4);
+    assert_eq!(updated.position(), unchecked.position());
+    assert_eq!(updated.checked(), unchecked.checked());
+    assert_eq!(list_version, version(5));
+    assert_eq!(
+        items.list_items(&owner, item_list.id()).unwrap(),
+        vec![updated]
+    );
+
     assert_eq!(
         items.delete_item(&owner, item_list.id(), &item_id, 3),
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(
+        items.delete_item(&other, item_list.id(), &item_id, 4),
+        Err(RepositoryError::NotFound)
+    );
+    assert_eq!(
+        items.delete_item(&owner, item_list.id(), &item_id, 4),
+        Ok(version(6))
+    );
+    assert_eq!(
+        items.delete_item(&owner, item_list.id(), &item_id, 4),
         Err(RepositoryError::NotFound)
     );
 
@@ -317,6 +363,52 @@ mod tests {
         }
         assert_eq!(
             Unimplemented.list_personal_for_owner(&user("owner")),
+            Err(RepositoryError::Unavailable)
+        );
+    }
+
+    #[test]
+    fn default_item_detail_update_is_fail_closed() {
+        struct Unimplemented;
+        impl ShoppingItemRepository for Unimplemented {
+            fn add_item(
+                &self,
+                _: &UserId,
+                _: &ListId,
+                _: AggregateVersion,
+                _: ShoppingItem,
+            ) -> Result<AggregateVersion, RepositoryError> {
+                Err(RepositoryError::Unavailable)
+            }
+            fn set_item_checked(
+                &self,
+                _: &UserId,
+                _: &ListId,
+                _: &ItemId,
+                _: u64,
+                _: bool,
+            ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+                Err(RepositoryError::Unavailable)
+            }
+            fn delete_item(
+                &self,
+                _: &UserId,
+                _: &ListId,
+                _: &ItemId,
+                _: u64,
+            ) -> Result<AggregateVersion, RepositoryError> {
+                Err(RepositoryError::Unavailable)
+            }
+        }
+        let details = item("fail-closed", "owner", 0).details();
+        assert_eq!(
+            Unimplemented.update_item_details(
+                &user("owner"),
+                &list_id("list"),
+                &ItemId::try_new("fail-closed").unwrap(),
+                1,
+                details
+            ),
             Err(RepositoryError::Unavailable)
         );
     }

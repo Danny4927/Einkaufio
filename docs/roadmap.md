@@ -178,7 +178,8 @@ These are initial product/abuse-control limits, not permanent technical constrai
 - [ ] Concrete ID generator and persistence adapter.
 - [ ] Atomic persistence of list metadata and owner index/reference.
 - [x] Shared repository contract scenarios run against the in-memory reference adapter; adapter-specific integration tests remain required for transaction/conditional-write behavior.
-- [ ] Item update and reorder use cases.
+- [x] Item detail update use case: full replacement of name/quantity/unit/note via `ItemDetails`; stale item versions conflict before no-op detection; item and list versions advance only on real changes; check state and position are preserved; item version exhaustion fails with `VersionExhausted` without mutating the item (also for check/uncheck); the port default is fail-closed. Covered by domain, use-case and shared repository contract tests (in-memory reference adapter).
+- [ ] Item reorder use case.
 - [ ] List detail query and cursor-based pagination.
 - [ ] Angular list overview/editor and item interaction flows with reviewed visual regression.
 - [ ] API contract tests plus owner/member/unauthorized and concurrency integration tests.
