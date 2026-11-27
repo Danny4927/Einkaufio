@@ -74,3 +74,4 @@
 - Household owner transfer must precede owner departure.
 - Choose backup/PITR before production data becomes important.
 - Document restore tests, not only backup configuration.
+- Provide account deletion (including memberships and invitations) and a personal data export before production (GDPR; roadmap Phase D2).

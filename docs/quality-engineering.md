@@ -166,5 +166,6 @@ Terraform plans are evidence of intended changes, not evidence that deployment s
 - Use root `AGENTS.md` as the concise entry point; keep detailed policy in this document and linked architecture/security documents.
 - `make verify` is the local CI-equivalent command; `make check` intentionally remains the faster backend/architecture/Terraform-format loop.
 - Each repository port contract should have reusable behavioral scenarios. Run the same scenarios against the in-memory fake and every production adapter. Cover authorization-before-existence-disclosure, fail-closed behavior, atomic expected-version comparison (including stale no-op rename), item/list version atomicity, item capacity/position assignment, and repeated-delete semantics.
-- Do not introduce a `VerifiedActor` marker until verified Cognito claims are represented at the API trust boundary. Its constructor must not be reachable from request DTOs or arbitrary strings.
+- `VerifiedActor` exists only at the API trust boundary and is created solely from verified Cognito claims. Keep its constructor unreachable from request DTOs or arbitrary strings; do not add public conversions from untrusted input.
+- Quality tooling without a current target (mutation testing, coverage thresholds, agent review automation) is scheduled by the trigger recorded in the roadmap's quality-gate track, not ahead of the code it protects.
 - Agent hooks and repository permission files are defense-in-depth only. CI, branch protection, code review and protected environments remain authoritative.
