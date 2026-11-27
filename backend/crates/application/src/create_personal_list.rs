@@ -21,23 +21,20 @@ pub enum CreatePersonalListError {
     RepositoryInvariantViolation,
 }
 
-pub struct CreatePersonalList<'a> {
-    repository: &'a dyn ShoppingListRepository,
+pub struct CreatePersonalList<'a, R> {
+    repository: &'a R,
     id_generator: &'a dyn ListIdGenerator,
 }
 
-impl<'a> CreatePersonalList<'a> {
-    pub fn new(
-        repository: &'a dyn ShoppingListRepository,
-        id_generator: &'a dyn ListIdGenerator,
-    ) -> Self {
+impl<'a, R: ShoppingListRepository> CreatePersonalList<'a, R> {
+    pub fn new(repository: &'a R, id_generator: &'a dyn ListIdGenerator) -> Self {
         Self {
             repository,
             id_generator,
         }
     }
 
-    pub fn execute(
+    pub async fn execute(
         &self,
         command: CreatePersonalListCommand,
     ) -> Result<ShoppingList, CreatePersonalListError> {
@@ -50,6 +47,7 @@ impl<'a> CreatePersonalList<'a> {
         let list = ShoppingList::new_personal(id, owner_id, name);
         self.repository
             .create_personal(list.clone())
+            .await
             .map_err(map_repository_error)?;
 
         Ok(list)
@@ -61,9 +59,11 @@ fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
         RepositoryError::AlreadyExists | RepositoryError::Conflict => {
             CreatePersonalListError::AlreadyExists
         }
-        // A newly generated list ID cannot legitimately be missing, and the list-create
-        // repository contract has no parent-item operation that could hit the item limit.
+        // A newly generated list ID cannot legitimately be missing or require a permission the
+        // creating owner lacks, and the list-create repository contract has no parent-item
+        // operation that could hit the item limit.
         RepositoryError::NotFound
+        | RepositoryError::Forbidden
         | RepositoryError::ItemLimitReached
         | RepositoryError::VersionExhausted => {
             CreatePersonalListError::RepositoryInvariantViolation
@@ -74,25 +74,26 @@ fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     use einkaufio_domain::ShoppingList;
 
     use super::{CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError};
     use crate::ports::{ListIdGenerator, RepositoryError, ShoppingListRepository};
+    use crate::test_support::BlockOn;
 
     #[derive(Default)]
     struct FakeRepository {
-        created: RefCell<Vec<ShoppingList>>,
+        created: Mutex<Vec<ShoppingList>>,
         failure: Option<RepositoryError>,
     }
 
     impl ShoppingListRepository for FakeRepository {
-        fn create_personal(&self, list: ShoppingList) -> Result<(), RepositoryError> {
+        async fn create_personal(&self, list: ShoppingList) -> Result<(), RepositoryError> {
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
-            self.created.borrow_mut().push(list);
+            self.created.lock().unwrap().push(list);
             Ok(())
         }
     }
@@ -118,13 +119,16 @@ mod tests {
         let ids = FixedIdGenerator("list-123");
         let use_case = CreatePersonalList::new(&repository, &ids);
 
-        let created = use_case.execute(command()).expect("list should be created");
+        let created = use_case
+            .execute(command())
+            .block_on()
+            .expect("list should be created");
 
         assert_eq!(created.id().as_str(), "list-123");
         assert_eq!(created.owner_id().as_str(), "authenticated-user-1");
         assert_eq!(created.name().as_str(), "Wocheneinkauf");
         assert_eq!(created.version(), 1);
-        assert_eq!(repository.created.borrow().len(), 1);
+        assert_eq!(repository.created.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -138,10 +142,10 @@ mod tests {
         };
 
         assert!(matches!(
-            use_case.execute(invalid),
+            use_case.execute(invalid).block_on(),
             Err(CreatePersonalListError::InvalidName(_))
         ));
-        assert!(repository.created.borrow().is_empty());
+        assert!(repository.created.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -155,10 +159,10 @@ mod tests {
         };
 
         assert!(matches!(
-            use_case.execute(invalid),
+            use_case.execute(invalid).block_on(),
             Err(CreatePersonalListError::InvalidOwner(_))
         ));
-        assert!(repository.created.borrow().is_empty());
+        assert!(repository.created.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -168,10 +172,10 @@ mod tests {
         let use_case = CreatePersonalList::new(&repository, &ids);
 
         assert!(matches!(
-            use_case.execute(command()),
+            use_case.execute(command()).block_on(),
             Err(CreatePersonalListError::InvalidGeneratedId(_))
         ));
-        assert!(repository.created.borrow().is_empty());
+        assert!(repository.created.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -184,24 +188,26 @@ mod tests {
         let use_case = CreatePersonalList::new(&repository, &ids);
 
         assert_eq!(
-            use_case.execute(command()),
+            use_case.execute(command()).block_on(),
             Err(CreatePersonalListError::AlreadyExists)
         );
     }
 
     #[test]
-    fn maps_missing_list_during_create_to_adapter_invariant_violation() {
-        let repository = FakeRepository {
-            failure: Some(RepositoryError::NotFound),
-            ..Default::default()
-        };
-        let ids = FixedIdGenerator("list-123");
-        let use_case = CreatePersonalList::new(&repository, &ids);
+    fn maps_impossible_create_outcomes_to_adapter_invariant_violation() {
+        for failure in [RepositoryError::NotFound, RepositoryError::Forbidden] {
+            let repository = FakeRepository {
+                failure: Some(failure),
+                ..Default::default()
+            };
+            let ids = FixedIdGenerator("list-123");
+            let use_case = CreatePersonalList::new(&repository, &ids);
 
-        assert_eq!(
-            use_case.execute(command()),
-            Err(CreatePersonalListError::RepositoryInvariantViolation)
-        );
+            assert_eq!(
+                use_case.execute(command()).block_on(),
+                Err(CreatePersonalListError::RepositoryInvariantViolation)
+            );
+        }
     }
 
     #[test]
@@ -214,7 +220,7 @@ mod tests {
         let use_case = CreatePersonalList::new(&repository, &ids);
 
         assert_eq!(
-            use_case.execute(command()),
+            use_case.execute(command()).block_on(),
             Err(CreatePersonalListError::PersistenceUnavailable)
         );
     }

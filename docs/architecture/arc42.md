@@ -6,7 +6,7 @@
 
 ## 1. Introduction and goals
 
-Einkaufio is a collaborative shopping-list application. Every user has an account and can create personal lists, share personal lists with selected users, create or join households, and manage multiple household-owned lists.
+Einkaufio is a collaborative shopping-list application. Every user has an account and can create personal lists, share personal lists with selected users (v1.x, ADR 015), create or join households, and manage multiple household-owned lists.
 
 The first client is an Angular PWA. A native Android client is a future option and must be possible without duplicating backend business logic or authorization.
 
@@ -151,8 +151,9 @@ These are logical boundaries inside one deployable modular monolith, not a manda
 
 - Cognito `sub` is canonical user ID.
 - Never trust caller IDs supplied in request bodies.
-- Personal list: owner or active explicit list member.
+- Personal list: owner (explicit list members are v1.x, ADR 015).
 - Household list: active member of its owning household.
+- Access resolves to Administrator or Contributor; repository ports receive the principal plus the required permission and enforce it atomically (ADR 015).
 - Household membership grants access to all household-owned lists.
 - Every operation checks persisted authorization server-side.
 - Avoid leaking whether inaccessible resources exist.
@@ -255,13 +256,13 @@ See [ADRs](decisions/README.md): serverless modular monolith, Cognito, DynamoDB 
 | Offline edits conflict | Start with cached reads; explicit pending write queue and conflict UX |
 | AWS pricing/free-tier changes | Budget alerts and recurring cost review |
 | Android requirements differ | Stable OpenAPI and shared backend domain rules |
-| Owner-only ports conflict with household/member access | Access-model ADR before household code (roadmap Phase C1); adapt ports and contract scenarios |
+| Adapters diverge in authorization | Domain rule table, access-scoped ports and shared-access contract scenarios (ADR 015) |
 | Unverified infrastructure assumptions (transactions, Cognito in PWA, Function URL/CORS) | Walking skeleton deployed to dev before further features (ADR 013, roadmap Phase A) |
 | Privacy non-compliance (GDPR) | Account deletion, data export and privacy notice as release items (roadmap Phase D2) |
 
 ## 11. Glossary
 
-- Personal list: user-owned list with optional explicit members.
+- Personal list: user-owned list; explicit members are planned for v1.x.
 - Household: shared container with members and multiple household-owned lists.
 - Owner: principal allowed to administer a resource.
 - Member: principal with collaborative access.

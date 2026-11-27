@@ -14,7 +14,7 @@ Attributes: `displayName`, optional normalized `email`, timestamps. Never use em
 - `SK=META`
 - Attributes: `type=PERSONAL`, `ownerId`, `name`, `version`, timestamps.
 - Owner overview reference: `PK=USER#<ownerSub>`, `SK=LIST#<listId>`.
-- Explicit member: `PK=LIST#<listId>`, `SK=MEMBER#<memberSub>`.
+- Explicit member (v1.x, ADR 015): `PK=LIST#<listId>`, `SK=MEMBER#<memberSub>`.
 
 ### Household
 - Metadata: `PK=HOUSEHOLD#<householdId>`, `SK=META`.
@@ -41,10 +41,12 @@ Attributes: `displayName`, optional normalized `email`, timestamps. Never use em
 |---|---|
 | Get user profile | GetItem USER / PROFILE |
 | List user's personal lists | Query USER with begins_with(SK, LIST#) |
+| List all lists accessible to a user (ADR 015) | Owned list refs above; from C2 also Query USER begins_with(SK, HOUSEHOLD#), Query each HOUSEHOLD#id begins_with(SK, LIST#), then BatchGet LIST META |
+| Resolve a principal's access to a list | GetItem LIST#id / META; household list: GetItem HOUSEHOLD#id / MEMBER#user |
 | List user's households | Query USER with begins_with(SK, HOUSEHOLD#) |
 | Get household metadata/members/lists | Query HOUSEHOLD#id |
 | Get list metadata/items/members | Query LIST#id |
-| Verify personal-list member | GetItem LIST#id / MEMBER#user |
+| Verify personal-list member (v1.x) | GetItem LIST#id / MEMBER#user |
 | Verify household member | GetItem HOUSEHOLD#id / MEMBER#user |
 | Lookup invitation | GetItem INVITE#hash / META |
 

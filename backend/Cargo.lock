@@ -204,6 +204,7 @@ version = "0.1.0"
 dependencies = [
  "einkaufio-application",
  "einkaufio-domain",
+ "tokio",
 ]
 
 [[package]]

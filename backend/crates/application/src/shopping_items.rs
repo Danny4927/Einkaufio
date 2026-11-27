@@ -2,10 +2,10 @@
 
 use einkaufio_domain::{
     AggregateVersion, ItemDetails, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit,
-    ItemValueError, ListId, ShoppingItem, UserId,
+    ItemValueError, ListId, ListOperation, ShoppingItem, UserId,
 };
 
-use crate::ports::{ItemIdGenerator, RepositoryError, ShoppingItemRepository};
+use crate::ports::{ItemIdGenerator, ListAccessRequest, RepositoryError, ShoppingItemRepository};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AddShoppingItemCommand {
@@ -32,27 +32,26 @@ pub enum ShoppingItemError {
     ItemLimitReached,
     VersionExhausted,
     NotFound,
+    /// The actor can see the list but lacks the permission the operation requires.
+    Forbidden,
     Conflict,
     PersistenceUnavailable,
 }
 
-pub struct AddShoppingItem<'a> {
-    repository: &'a dyn ShoppingItemRepository,
+pub struct AddShoppingItem<'a, R> {
+    repository: &'a R,
     id_generator: &'a dyn ItemIdGenerator,
 }
 
-impl<'a> AddShoppingItem<'a> {
-    pub fn new(
-        repository: &'a dyn ShoppingItemRepository,
-        id_generator: &'a dyn ItemIdGenerator,
-    ) -> Self {
+impl<'a, R: ShoppingItemRepository> AddShoppingItem<'a, R> {
+    pub fn new(repository: &'a R, id_generator: &'a dyn ItemIdGenerator) -> Self {
         Self {
             repository,
             id_generator,
         }
     }
 
-    pub fn execute(
+    pub async fn execute(
         &self,
         command: AddShoppingItemCommand,
     ) -> Result<(ShoppingItem, u64), ShoppingItemError> {
@@ -74,15 +73,17 @@ impl<'a> AddShoppingItem<'a> {
         // Position is deliberately not client-controlled. The adapter assigns the next unique
         // position in the same atomic operation that enforces the list capacity.
         let item = ShoppingItem::new(item_id, name, quantity, unit, note, 0, actor.clone());
+        let access = ListAccessRequest::for_operation(actor, ListOperation::EditItems);
         let next_list_version = self
             .repository
             .add_item(
-                &actor,
+                &access,
                 &list_id,
                 AggregateVersion::try_new(command.expected_list_version)
                     .map_err(|_| ShoppingItemError::InvalidExpectedVersion)?,
                 item.clone(),
             )
+            .await
             .map_err(map_repository_error)?;
         Ok((item, next_list_version.as_u64()))
     }
@@ -98,17 +99,17 @@ pub struct SetShoppingItemCheckedCommand {
     pub checked: bool,
 }
 
-pub struct SetShoppingItemChecked<'a> {
-    repository: &'a dyn ShoppingItemRepository,
+pub struct SetShoppingItemChecked<'a, R> {
+    repository: &'a R,
 }
 
-impl<'a> SetShoppingItemChecked<'a> {
-    pub fn new(repository: &'a dyn ShoppingItemRepository) -> Self {
+impl<'a, R: ShoppingItemRepository> SetShoppingItemChecked<'a, R> {
+    pub fn new(repository: &'a R) -> Self {
         Self { repository }
     }
 
     /// Returns the persisted item and the new parent-list version.
-    pub fn execute(
+    pub async fn execute(
         &self,
         command: SetShoppingItemCheckedCommand,
     ) -> Result<(ShoppingItem, u64), ShoppingItemError> {
@@ -121,14 +122,16 @@ impl<'a> SetShoppingItemChecked<'a> {
         if command.expected_item_version == 0 {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
+        let access = ListAccessRequest::for_operation(actor, ListOperation::EditItems);
         self.repository
             .set_item_checked(
-                &actor,
+                &access,
                 &list_id,
                 &item_id,
                 command.expected_item_version,
                 command.checked,
             )
+            .await
             .map(|(item, version)| (item, version.as_u64()))
             .map_err(map_repository_error)
     }
@@ -148,17 +151,17 @@ pub struct UpdateShoppingItemCommand {
     pub note: Option<String>,
 }
 
-pub struct UpdateShoppingItem<'a> {
-    repository: &'a dyn ShoppingItemRepository,
+pub struct UpdateShoppingItem<'a, R> {
+    repository: &'a R,
 }
 
-impl<'a> UpdateShoppingItem<'a> {
-    pub fn new(repository: &'a dyn ShoppingItemRepository) -> Self {
+impl<'a, R: ShoppingItemRepository> UpdateShoppingItem<'a, R> {
+    pub fn new(repository: &'a R) -> Self {
         Self { repository }
     }
 
     /// Returns the persisted item and the parent-list version after the update.
-    pub fn execute(
+    pub async fn execute(
         &self,
         command: UpdateShoppingItemCommand,
     ) -> Result<(ShoppingItem, u64), ShoppingItemError> {
@@ -172,14 +175,16 @@ impl<'a> UpdateShoppingItem<'a> {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
         let details = item_details(command.name, command.quantity, command.unit, command.note)?;
+        let access = ListAccessRequest::for_operation(actor, ListOperation::EditItems);
         self.repository
             .update_item_details(
-                &actor,
+                &access,
                 &list_id,
                 &item_id,
                 command.expected_item_version,
                 details,
             )
+            .await
             .map(|(item, version)| (item, version.as_u64()))
             .map_err(map_repository_error)
     }
@@ -194,17 +199,20 @@ pub struct DeleteShoppingItemCommand {
     pub expected_item_version: u64,
 }
 
-pub struct DeleteShoppingItem<'a> {
-    repository: &'a dyn ShoppingItemRepository,
+pub struct DeleteShoppingItem<'a, R> {
+    repository: &'a R,
 }
 
-impl<'a> DeleteShoppingItem<'a> {
-    pub fn new(repository: &'a dyn ShoppingItemRepository) -> Self {
+impl<'a, R: ShoppingItemRepository> DeleteShoppingItem<'a, R> {
+    pub fn new(repository: &'a R) -> Self {
         Self { repository }
     }
 
     /// Returns the new parent-list version (not an item version).
-    pub fn execute(&self, command: DeleteShoppingItemCommand) -> Result<u64, ShoppingItemError> {
+    pub async fn execute(
+        &self,
+        command: DeleteShoppingItemCommand,
+    ) -> Result<u64, ShoppingItemError> {
         let actor =
             UserId::try_new(command.actor_id).map_err(|_| ShoppingItemError::InvalidActor)?;
         let list_id =
@@ -214,8 +222,10 @@ impl<'a> DeleteShoppingItem<'a> {
         if command.expected_item_version == 0 {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
+        let access = ListAccessRequest::for_operation(actor, ListOperation::EditItems);
         self.repository
-            .delete_item(&actor, &list_id, &item_id, command.expected_item_version)
+            .delete_item(&access, &list_id, &item_id, command.expected_item_version)
+            .await
             .map(|version| version.as_u64())
             .map_err(map_repository_error)
     }
@@ -259,6 +269,7 @@ fn optional_value(value: Option<String>) -> Option<String> {
 fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
     match error {
         RepositoryError::NotFound => ShoppingItemError::NotFound,
+        RepositoryError::Forbidden => ShoppingItemError::Forbidden,
         RepositoryError::Conflict | RepositoryError::AlreadyExists => ShoppingItemError::Conflict,
         RepositoryError::ItemLimitReached => ShoppingItemError::ItemLimitReached,
         RepositoryError::VersionExhausted => ShoppingItemError::VersionExhausted,
@@ -268,38 +279,41 @@ fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
-    use einkaufio_domain::{ItemId, ItemName, ShoppingItem, UserId};
+    use einkaufio_domain::{ItemId, ItemName, ListPermission, ShoppingItem, UserId};
 
     use super::*;
     use crate::ports::RepositoryError;
+    use crate::test_support::BlockOn;
 
     type CheckedCall = (UserId, String, ItemId, u64, bool);
 
     #[derive(Default)]
     struct FakeRepository {
-        added: RefCell<Vec<(UserId, String, u64, ShoppingItem)>>,
-        checked: RefCell<Vec<CheckedCall>>,
-        deleted: RefCell<Vec<(UserId, String, ItemId, u64)>>,
-        updated: RefCell<Vec<(UserId, ItemId, u64, ItemDetails)>>,
+        added: Mutex<Vec<(UserId, String, u64, ShoppingItem)>>,
+        checked: Mutex<Vec<CheckedCall>>,
+        deleted: Mutex<Vec<(UserId, String, ItemId, u64)>>,
+        updated: Mutex<Vec<(UserId, ItemId, u64, ItemDetails)>>,
         failure: Option<RepositoryError>,
         list_version_after_mutation: u64,
+        requests: Mutex<Vec<ListAccessRequest>>,
     }
 
     impl ShoppingItemRepository for FakeRepository {
-        fn add_item(
+        async fn add_item(
             &self,
-            actor_id: &UserId,
+            access: &ListAccessRequest,
             list_id: &ListId,
             expected_version: AggregateVersion,
             item: ShoppingItem,
         ) -> Result<AggregateVersion, RepositoryError> {
+            self.requests.lock().unwrap().push(access.clone());
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
-            self.added.borrow_mut().push((
-                actor_id.clone(),
+            self.added.lock().unwrap().push((
+                access.principal().clone(),
                 list_id.as_str().to_owned(),
                 expected_version.as_u64(),
                 item,
@@ -311,19 +325,20 @@ mod tests {
             .unwrap())
         }
 
-        fn set_item_checked(
+        async fn set_item_checked(
             &self,
-            actor_id: &UserId,
+            access: &ListAccessRequest,
             list_id: &ListId,
             item_id: &ItemId,
             expected_version: u64,
             checked: bool,
         ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+            self.requests.lock().unwrap().push(access.clone());
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
-            self.checked.borrow_mut().push((
-                actor_id.clone(),
+            self.checked.lock().unwrap().push((
+                access.principal().clone(),
                 list_id.as_str().to_owned(),
                 item_id.clone(),
                 expected_version,
@@ -336,7 +351,7 @@ mod tests {
                 None,
                 None,
                 0,
-                actor_id.clone(),
+                access.principal().clone(),
             );
             item.set_checked(checked).unwrap();
             // Set an independently controlled value in the fake so the test can prove the
@@ -350,19 +365,20 @@ mod tests {
             ))
         }
 
-        fn update_item_details(
+        async fn update_item_details(
             &self,
-            actor_id: &UserId,
+            access: &ListAccessRequest,
             _list_id: &ListId,
             item_id: &ItemId,
             expected_version: u64,
             details: ItemDetails,
         ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+            self.requests.lock().unwrap().push(access.clone());
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
-            self.updated.borrow_mut().push((
-                actor_id.clone(),
+            self.updated.lock().unwrap().push((
+                access.principal().clone(),
                 item_id.clone(),
                 expected_version,
                 details.clone(),
@@ -374,7 +390,7 @@ mod tests {
                 None,
                 None,
                 0,
-                actor_id.clone(),
+                access.principal().clone(),
             );
             item.update_details(details).unwrap();
             Ok((
@@ -383,18 +399,19 @@ mod tests {
             ))
         }
 
-        fn delete_item(
+        async fn delete_item(
             &self,
-            actor_id: &UserId,
+            access: &ListAccessRequest,
             list_id: &ListId,
             item_id: &ItemId,
             expected_version: u64,
         ) -> Result<AggregateVersion, RepositoryError> {
+            self.requests.lock().unwrap().push(access.clone());
             if let Some(error) = &self.failure {
                 return Err(error.clone());
             }
-            self.deleted.borrow_mut().push((
-                actor_id.clone(),
+            self.deleted.lock().unwrap().push((
+                access.principal().clone(),
                 list_id.as_str().to_owned(),
                 item_id.clone(),
                 expected_version,
@@ -453,13 +470,14 @@ mod tests {
         };
         let (item, list_version) = AddShoppingItem::new(&repository, &FixedId)
             .execute(add_command())
+            .block_on()
             .unwrap();
 
         assert_eq!(item.id().as_str(), "item-123");
         assert_eq!(item.name().as_str(), "Milch");
         assert_eq!(item.quantity().unwrap().as_str(), "2");
         assert_eq!(list_version, 5);
-        let added = repository.added.borrow();
+        let added = repository.added.lock().unwrap();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].0.as_str(), "user-1");
         assert_eq!(added[0].3.position(), 0);
@@ -476,6 +494,7 @@ mod tests {
         };
         let (item, _) = AddShoppingItem::new(&repository, &FixedId)
             .execute(command)
+            .block_on()
             .unwrap();
         assert!(item.quantity().is_none());
         assert!(item.unit().is_none());
@@ -490,55 +509,67 @@ mod tests {
             ..add_command()
         };
         assert!(matches!(
-            AddShoppingItem::new(&repository, &FixedId).execute(invalid),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(invalid)
+                .block_on(),
             Err(ShoppingItemError::InvalidName(_))
         ));
-        assert!(repository.added.borrow().is_empty());
+        assert!(repository.added.lock().unwrap().is_empty());
     }
 
     #[test]
     fn rejects_invalid_actor_and_identifiers() {
         let repository = FakeRepository::default();
         assert_eq!(
-            AddShoppingItem::new(&repository, &FixedId).execute(AddShoppingItemCommand {
-                actor_id: " ".into(),
-                ..add_command()
-            }),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(AddShoppingItemCommand {
+                    actor_id: " ".into(),
+                    ..add_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidActor)
         );
         assert_eq!(
-            AddShoppingItem::new(&repository, &FixedId).execute(AddShoppingItemCommand {
-                list_id: " ".into(),
-                ..add_command()
-            }),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(AddShoppingItemCommand {
+                    list_id: " ".into(),
+                    ..add_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidListId)
         );
         assert_eq!(
-            SetShoppingItemChecked::new(&repository).execute(SetShoppingItemCheckedCommand {
-                item_id: " ".into(),
-                ..check_command()
-            }),
+            SetShoppingItemChecked::new(&repository)
+                .execute(SetShoppingItemCheckedCommand {
+                    item_id: " ".into(),
+                    ..check_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidItemId)
         );
-        assert!(repository.added.borrow().is_empty());
-        assert!(repository.checked.borrow().is_empty());
+        assert!(repository.added.lock().unwrap().is_empty());
+        assert!(repository.checked.lock().unwrap().is_empty());
     }
 
     #[test]
     fn rejects_invalid_actor_for_check_and_delete() {
         let repository = FakeRepository::default();
         assert_eq!(
-            SetShoppingItemChecked::new(&repository).execute(SetShoppingItemCheckedCommand {
-                actor_id: " ".into(),
-                ..check_command()
-            }),
+            SetShoppingItemChecked::new(&repository)
+                .execute(SetShoppingItemCheckedCommand {
+                    actor_id: " ".into(),
+                    ..check_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidActor)
         );
         assert_eq!(
-            DeleteShoppingItem::new(&repository).execute(DeleteShoppingItemCommand {
-                actor_id: " ".into(),
-                ..delete_command()
-            }),
+            DeleteShoppingItem::new(&repository)
+                .execute(DeleteShoppingItemCommand {
+                    actor_id: " ".into(),
+                    ..delete_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidActor)
         );
     }
@@ -547,21 +578,25 @@ mod tests {
     fn rejects_zero_expected_versions_for_check_and_delete() {
         let repository = FakeRepository::default();
         assert_eq!(
-            SetShoppingItemChecked::new(&repository).execute(SetShoppingItemCheckedCommand {
-                expected_item_version: 0,
-                ..check_command()
-            }),
+            SetShoppingItemChecked::new(&repository)
+                .execute(SetShoppingItemCheckedCommand {
+                    expected_item_version: 0,
+                    ..check_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidExpectedVersion)
         );
         assert_eq!(
-            DeleteShoppingItem::new(&repository).execute(DeleteShoppingItemCommand {
-                expected_item_version: 0,
-                ..delete_command()
-            }),
+            DeleteShoppingItem::new(&repository)
+                .execute(DeleteShoppingItemCommand {
+                    expected_item_version: 0,
+                    ..delete_command()
+                })
+                .block_on(),
             Err(ShoppingItemError::InvalidExpectedVersion)
         );
-        assert!(repository.checked.borrow().is_empty());
-        assert!(repository.deleted.borrow().is_empty());
+        assert!(repository.checked.lock().unwrap().is_empty());
+        assert!(repository.deleted.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -572,7 +607,9 @@ mod tests {
             ..add_command()
         };
         assert!(matches!(
-            AddShoppingItem::new(&repository, &FixedId).execute(quantity_too_long),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(quantity_too_long)
+                .block_on(),
             Err(ShoppingItemError::InvalidQuantity(_))
         ));
         let unit_with_control = AddShoppingItemCommand {
@@ -580,7 +617,9 @@ mod tests {
             ..add_command()
         };
         assert!(matches!(
-            AddShoppingItem::new(&repository, &FixedId).execute(unit_with_control),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(unit_with_control)
+                .block_on(),
             Err(ShoppingItemError::InvalidUnit(_))
         ));
         let note_too_long = AddShoppingItemCommand {
@@ -588,10 +627,12 @@ mod tests {
             ..add_command()
         };
         assert!(matches!(
-            AddShoppingItem::new(&repository, &FixedId).execute(note_too_long),
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(note_too_long)
+                .block_on(),
             Err(ShoppingItemError::InvalidNote(_))
         ));
-        assert!(repository.added.borrow().is_empty());
+        assert!(repository.added.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -613,7 +654,9 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(
-                AddShoppingItem::new(&repository, &FixedId).execute(add_command()),
+                AddShoppingItem::new(&repository, &FixedId)
+                    .execute(add_command())
+                    .block_on(),
                 Err(expected)
             );
         }
@@ -627,11 +670,12 @@ mod tests {
         };
         let (item, list_version) = SetShoppingItemChecked::new(&repository)
             .execute(check_command())
+            .block_on()
             .unwrap();
 
         assert_eq!(item.version(), 2);
         assert_eq!(list_version, 42);
-        let checked = repository.checked.borrow();
+        let checked = repository.checked.lock().unwrap();
         assert_eq!(checked[0].0.as_str(), "user-1");
         assert_eq!(checked[0].3, 1);
     }
@@ -644,14 +688,16 @@ mod tests {
         };
         SetShoppingItemChecked::new(&repository)
             .execute(check_command())
+            .block_on()
             .unwrap();
         DeleteShoppingItem::new(&repository)
             .execute(delete_command())
+            .block_on()
             .unwrap();
 
-        assert_eq!(repository.checked.borrow()[0].0.as_str(), "user-1");
-        assert_eq!(repository.deleted.borrow()[0].0.as_str(), "user-1");
-        assert_eq!(repository.deleted.borrow()[0].3, 1);
+        assert_eq!(repository.checked.lock().unwrap()[0].0.as_str(), "user-1");
+        assert_eq!(repository.deleted.lock().unwrap()[0].0.as_str(), "user-1");
+        assert_eq!(repository.deleted.lock().unwrap()[0].3, 1);
     }
 
     #[test]
@@ -661,7 +707,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            DeleteShoppingItem::new(&missing).execute(delete_command()),
+            DeleteShoppingItem::new(&missing)
+                .execute(delete_command())
+                .block_on(),
             Err(ShoppingItemError::NotFound)
         );
 
@@ -670,7 +718,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            DeleteShoppingItem::new(&unavailable).execute(delete_command()),
+            DeleteShoppingItem::new(&unavailable)
+                .execute(delete_command())
+                .block_on(),
             Err(ShoppingItemError::PersistenceUnavailable)
         );
     }
@@ -693,12 +743,13 @@ mod tests {
         let repository = FakeRepository::default();
         let (item, list_version) = UpdateShoppingItem::new(&repository)
             .execute(update_command())
+            .block_on()
             .unwrap();
         assert_eq!(item.name().as_str(), "Hafermilch");
         assert_eq!(item.quantity(), None);
         assert_eq!(item.unit().unwrap().as_str(), "Packung");
         assert_eq!(list_version, 13);
-        let calls = repository.updated.borrow();
+        let calls = repository.updated.lock().unwrap();
         assert_eq!(calls.len(), 1);
         let (actor, item_id, expected, details) = &calls[0];
         assert_eq!(actor.as_str(), "user-1");
@@ -772,9 +823,9 @@ mod tests {
             ),
         ];
         for (command, expected) in cases {
-            assert_eq!(use_case.execute(command), Err(expected));
+            assert_eq!(use_case.execute(command).block_on(), Err(expected));
         }
-        assert!(repository.updated.borrow().is_empty());
+        assert!(repository.updated.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -796,9 +847,59 @@ mod tests {
                 ..FakeRepository::default()
             };
             assert_eq!(
-                UpdateShoppingItem::new(&repository).execute(update_command()),
+                UpdateShoppingItem::new(&repository)
+                    .execute(update_command())
+                    .block_on(),
                 Err(expected)
             );
         }
+    }
+
+    #[test]
+    fn every_item_use_case_requests_contribute_permission_for_the_verified_actor() {
+        let repository = FakeRepository::default();
+        AddShoppingItem::new(&repository, &FixedId)
+            .execute(add_command())
+            .block_on()
+            .unwrap();
+        SetShoppingItemChecked::new(&repository)
+            .execute(check_command())
+            .block_on()
+            .unwrap();
+        UpdateShoppingItem::new(&repository)
+            .execute(update_command())
+            .block_on()
+            .unwrap();
+        DeleteShoppingItem::new(&repository)
+            .execute(delete_command())
+            .block_on()
+            .unwrap();
+
+        let requests = repository.requests.lock().unwrap();
+        assert_eq!(requests.len(), 4);
+        for request in requests.iter() {
+            assert_eq!(request.principal().as_str(), "user-1");
+            assert_eq!(request.permission(), ListPermission::Contribute);
+        }
+    }
+
+    #[test]
+    fn maps_forbidden_without_converting_it_to_not_found() {
+        let repository = FakeRepository {
+            failure: Some(RepositoryError::Forbidden),
+            ..FakeRepository::default()
+        };
+        assert_eq!(
+            DeleteShoppingItem::new(&repository)
+                .execute(delete_command())
+                .block_on(),
+            Err(ShoppingItemError::Forbidden)
+        );
+        assert_eq!(
+            AddShoppingItem::new(&repository, &FixedId)
+                .execute(add_command())
+                .block_on(),
+            Err(ShoppingItemError::Forbidden)
+        );
     }
 }

@@ -1,5 +1,6 @@
 //! Shopping-list aggregate and its invariants.
 
+use crate::access::ListAccess;
 use crate::identifiers::{ListId, UserId};
 
 /// A positive, monotonically increasing aggregate version.
@@ -127,6 +128,14 @@ impl ShoppingList {
         &self.owner_id
     }
 
+    /// Access granted by the list record itself: the personal owner administers the list.
+    ///
+    /// Access through household membership (roadmap C2) or explicit list membership (v1.x)
+    /// is held in membership records and resolved by the persistence adapter (ADR 015).
+    pub fn ownership_access(&self, principal: &UserId) -> Option<ListAccess> {
+        (&self.owner_id == principal).then_some(ListAccess::Administrator)
+    }
+
     pub fn name(&self) -> &ListName {
         &self.name
     }
@@ -147,6 +156,7 @@ mod tests {
         AggregateVersion, AggregateVersionError, ListMutationError, ListName, ListNameError,
         ShoppingList,
     };
+    use crate::access::ListAccess;
     use crate::identifiers::{ListId, UserId};
 
     fn list() -> ShoppingList {
@@ -196,6 +206,19 @@ mod tests {
         assert_eq!(list.aggregate_version(), AggregateVersion::initial());
         assert_eq!(list.name().as_str(), "Einkauf");
         assert_eq!(list.owner_id().as_str(), "user-1");
+    }
+
+    #[test]
+    fn personal_owner_administers_the_list_and_others_get_no_ownership_access() {
+        let list = list();
+        assert_eq!(
+            list.ownership_access(&UserId::try_new("user-1").unwrap()),
+            Some(ListAccess::Administrator)
+        );
+        assert_eq!(
+            list.ownership_access(&UserId::try_new("user-2").unwrap()),
+            None
+        );
     }
 
     #[test]

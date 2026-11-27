@@ -1,4 +1,4 @@
-//! HTTP transport for personal shopping lists.
+//! HTTP transport for shopping lists.
 
 use std::sync::Arc;
 
@@ -12,24 +12,34 @@ use axum::{
     routing::get,
 };
 use einkaufio_application::{
-    CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError, ListIdGenerator,
-    ListPersonalLists, ListPersonalListsError, ListPersonalListsQuery, ShoppingList,
+    CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError, ListAccessibleLists,
+    ListAccessibleListsError, ListAccessibleListsQuery, ListIdGenerator, ShoppingList,
     ShoppingListRepository,
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone)]
-pub struct ApiState {
-    lists: Arc<dyn ShoppingListRepository + Send + Sync>,
-    ids: Arc<dyn ListIdGenerator + Send + Sync>,
+/// Shared handler state, generic over the list repository.
+///
+/// Repository ports use `async fn` in traits and are therefore statically dispatched
+/// (ADR 014); the composition root picks the concrete adapter type.
+pub struct ApiState<L> {
+    lists: Arc<L>,
+    ids: Arc<dyn ListIdGenerator>,
     verifier: Option<Arc<CognitoTokenVerifier>>,
 }
 
-impl ApiState {
-    pub fn new(
-        lists: Arc<dyn ShoppingListRepository + Send + Sync>,
-        ids: Arc<dyn ListIdGenerator + Send + Sync>,
-    ) -> Self {
+impl<L> Clone for ApiState<L> {
+    fn clone(&self) -> Self {
+        Self {
+            lists: Arc::clone(&self.lists),
+            ids: Arc::clone(&self.ids),
+            verifier: self.verifier.clone(),
+        }
+    }
+}
+
+impl<L: ShoppingListRepository + 'static> ApiState<L> {
+    pub fn new(lists: Arc<L>, ids: Arc<dyn ListIdGenerator>) -> Self {
         Self {
             lists,
             ids,
@@ -44,8 +54,8 @@ impl ApiState {
 
     /// Build an authenticated API state from trusted runtime environment variables.
     pub fn from_cognito_env(
-        lists: Arc<dyn ShoppingListRepository + Send + Sync>,
-        ids: Arc<dyn ListIdGenerator + Send + Sync>,
+        lists: Arc<L>,
+        ids: Arc<dyn ListIdGenerator>,
     ) -> Result<Self, AuthError> {
         let config = crate::auth::CognitoConfig::from_env()?;
         let verifier = CognitoTokenVerifier::new(config)?;
@@ -56,22 +66,25 @@ impl ApiState {
 /// Build the HTTP router. This function does not read the environment: the composition root
 /// must construct the state with [`ApiState::from_cognito_env`] and abort startup on error.
 /// A state without a verifier keeps protected routes fail-closed (503).
-pub fn router(state: ApiState) -> Router {
+pub fn router<L: ShoppingListRepository + 'static>(state: ApiState<L>) -> Router {
     let protected = protected_routes().route_layer(middleware::from_fn_with_state(
         state.clone(),
-        require_verified_actor,
+        require_verified_actor::<L>,
     ));
     build_router(state, protected)
 }
 
-fn protected_routes() -> Router<ApiState> {
+fn protected_routes<L: ShoppingListRepository + 'static>() -> Router<ApiState<L>> {
     Router::new().route(
         "/lists",
-        get(list_personal_lists).post(create_personal_list),
+        get(list_accessible_lists::<L>).post(create_personal_list::<L>),
     )
 }
 
-fn build_router(state: ApiState, protected: Router<ApiState>) -> Router {
+fn build_router<L: ShoppingListRepository + 'static>(
+    state: ApiState<L>,
+    protected: Router<ApiState<L>>,
+) -> Router {
     Router::new()
         .route("/health", get(health))
         .nest("/api", protected)
@@ -90,26 +103,23 @@ struct HealthResponse {
 /// Constructible only inside this crate from a cryptographically verified Cognito subject.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct VerifiedActor {
-    owner_id: String,
+    principal_id: String,
 }
 
 impl VerifiedActor {
-    pub(crate) fn from_verified_claims(owner_id: String) -> Self {
-        Self { owner_id }
+    pub(crate) fn from_verified_claims(principal_id: String) -> Self {
+        Self { principal_id }
     }
 
-    fn owner_id(&self) -> &str {
-        &self.owner_id
+    fn principal_id(&self) -> &str {
+        &self.principal_id
     }
 }
 
-impl FromRequestParts<ApiState> for VerifiedActor {
+impl<S: Send + Sync> FromRequestParts<S> for VerifiedActor {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &ApiState,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         parts
             .extensions
             .get::<Self>()
@@ -119,8 +129,8 @@ impl FromRequestParts<ApiState> for VerifiedActor {
     }
 }
 
-async fn require_verified_actor(
-    State(state): State<ApiState>,
+async fn require_verified_actor<L: ShoppingListRepository + 'static>(
+    State(state): State<ApiState<L>>,
     mut request: axum::extract::Request,
     next: Next,
 ) -> Response {
@@ -186,15 +196,16 @@ struct ListPageResponse {
     items: Vec<ListResponse>,
 }
 
-async fn list_personal_lists(
-    State(state): State<ApiState>,
+async fn list_accessible_lists<L: ShoppingListRepository + 'static>(
+    State(state): State<ApiState<L>>,
     actor: VerifiedActor,
 ) -> Result<Json<ListPageResponse>, ApiError> {
-    let use_case = ListPersonalLists::new(state.lists.as_ref());
+    let use_case = ListAccessibleLists::new(state.lists.as_ref());
     let lists = use_case
-        .execute(ListPersonalListsQuery {
-            owner_id: actor.owner_id().to_owned(),
+        .execute(ListAccessibleListsQuery {
+            principal_id: actor.principal_id().to_owned(),
         })
+        .await
         .map_err(ApiError::from)?;
 
     Ok(Json(ListPageResponse {
@@ -202,17 +213,18 @@ async fn list_personal_lists(
     }))
 }
 
-async fn create_personal_list(
-    State(state): State<ApiState>,
+async fn create_personal_list<L: ShoppingListRepository + 'static>(
+    State(state): State<ApiState<L>>,
     actor: VerifiedActor,
     Json(payload): Json<CreateListRequest>,
 ) -> Result<(StatusCode, Json<ListResponse>), ApiError> {
     let use_case = CreatePersonalList::new(state.lists.as_ref(), state.ids.as_ref());
     let list = use_case
         .execute(CreatePersonalListCommand {
-            owner_id: actor.owner_id().to_owned(),
+            owner_id: actor.principal_id().to_owned(),
             name: payload.name,
         })
+        .await
         .map_err(ApiError::from)?;
 
     Ok((StatusCode::CREATED, Json(ListResponse::from(&list))))
@@ -261,12 +273,12 @@ impl From<CreatePersonalListError> for ApiError {
     }
 }
 
-impl From<ListPersonalListsError> for ApiError {
-    fn from(error: ListPersonalListsError) -> Self {
+impl From<ListAccessibleListsError> for ApiError {
+    fn from(error: ListAccessibleListsError) -> Self {
         match error {
-            ListPersonalListsError::InvalidOwner(_)
-            | ListPersonalListsError::RepositoryInvariantViolation => Self::Internal,
-            ListPersonalListsError::PersistenceUnavailable => Self::Unavailable,
+            ListAccessibleListsError::InvalidPrincipal(_)
+            | ListAccessibleListsError::RepositoryInvariantViolation => Self::Internal,
+            ListAccessibleListsError::PersistenceUnavailable => Self::Unavailable,
         }
     }
 }
@@ -329,7 +341,7 @@ mod tests {
     }
 
     impl ShoppingListRepository for TestLists {
-        fn create_personal(
+        async fn create_personal(
             &self,
             list: ShoppingList,
         ) -> Result<(), einkaufio_application::RepositoryError> {
@@ -347,7 +359,8 @@ mod tests {
     }
 
     fn test_router() -> Router {
-        let protected = protected_routes().route_layer(middleware::from_fn(inject_test_actor));
+        let protected =
+            protected_routes::<TestLists>().route_layer(middleware::from_fn(inject_test_actor));
         build_router(
             ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds)),
             protected,
@@ -356,7 +369,7 @@ mod tests {
 
     async fn inject_test_actor(mut request: axum::extract::Request, next: Next) -> Response {
         request.extensions_mut().insert(VerifiedActor {
-            owner_id: "verified-test-owner".to_owned(),
+            principal_id: "verified-test-owner".to_owned(),
         });
         next.run(request).await
     }
@@ -494,7 +507,7 @@ mod tests {
     }
 
     impl ShoppingListRepository for RecordingLists {
-        fn create_personal(
+        async fn create_personal(
             &self,
             list: ShoppingList,
         ) -> Result<(), einkaufio_application::RepositoryError> {
@@ -566,5 +579,80 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         f.server.abort();
+    }
+
+    struct AccessibleLists {
+        principals: Mutex<Vec<String>>,
+    }
+
+    impl ShoppingListRepository for AccessibleLists {
+        async fn create_personal(
+            &self,
+            _list: ShoppingList,
+        ) -> Result<(), einkaufio_application::RepositoryError> {
+            Ok(())
+        }
+
+        async fn list_accessible(
+            &self,
+            principal: &einkaufio_application::UserId,
+        ) -> Result<Vec<ShoppingList>, einkaufio_application::RepositoryError> {
+            self.principals
+                .lock()
+                .unwrap()
+                .push(principal.as_str().to_owned());
+            Ok(vec![ShoppingList::new_personal(
+                einkaufio_application::ListId::try_new("accessible-list").unwrap(),
+                principal.clone(),
+                einkaufio_application::ListName::try_new("Wocheneinkauf").unwrap(),
+            )])
+        }
+    }
+
+    #[tokio::test]
+    async fn list_route_queries_lists_accessible_to_the_verified_principal() {
+        let lists = Arc::new(AccessibleLists {
+            principals: Mutex::new(Vec::new()),
+        });
+        let protected = protected_routes::<AccessibleLists>()
+            .route_layer(middleware::from_fn(inject_test_actor));
+        let app = build_router(ApiState::new(lists.clone(), Arc::new(TestIds)), protected);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/lists?ownerId=attacker")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["items"][0]["id"], "accessible-list");
+        assert_eq!(value["items"][0]["version"], 1);
+        assert_eq!(
+            *lists.principals.lock().unwrap(),
+            vec!["verified-test-owner".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_route_fails_closed_when_the_adapter_lacks_the_query() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/lists")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], "service_unavailable");
     }
 }

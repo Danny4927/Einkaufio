@@ -22,9 +22,12 @@
 ## Authorization
 
 - Centralize authorization in application services.
-- Personal list: owner or active explicit list member.
+- Personal list: owner. Explicit list members are deferred to v1.x (ADR 015).
 - Household: active household member.
 - Household list: active member of owning household.
+- Effective list access is Administrator (personal-list owner, owner of the owning household) or Contributor (active household member). Contributors read and edit items; only administrators rename or delete a list. The rule table lives in the domain (`ListOperation::required_permission`, ADR 015).
+- No access returns 404, indistinguishable from a missing resource; access that is too weak returns 403. Authorization is checked before expected versions.
+- Enforce persisted access atomically with the mutation (conditional writes/transactions), never as a separate earlier check.
 - Only resource owners administer membership and delete/transfer ownership.
 - Re-check persisted membership for every protected request.
 - Avoid disclosing the existence of inaccessible resource IDs.

@@ -15,5 +15,7 @@
 | [011](011-monorepo-terraform-and-enforced-architecture.md) | Monorepo, Terraform IaC and enforceable architecture | Accepted |
 | [012](012-agent-workflow-and-enforced-quality-gates.md) | Agent workflow and enforced quality gates | Accepted |
 | [013](013-walking-skeleton-and-vertical-delivery-phases.md) | Walking skeleton first and vertical delivery phases | Accepted |
+| [014](014-async-repository-ports.md) | Asynchronous repository ports | Accepted |
+| [015](015-list-access-model.md) | List access model (owner/household; explicit sharing in v1.x) | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.

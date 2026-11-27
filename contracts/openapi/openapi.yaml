@@ -68,13 +68,16 @@ paths:
   /api/lists:
     get:
       tags: [Lists]
-      summary: List personal lists accessible to current user
+      summary: List shopping lists accessible to the current user
+      description: |
+        Owned personal lists and lists of households in which the caller is an active member
+        (ADR 015). Access is resolved from persisted ownership and membership on every request.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Personal lists
+          description: Accessible lists
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ListPage' }
@@ -316,7 +319,7 @@ paths:
       - $ref: '#/components/parameters/ListId'
     post:
       tags: [Invitations]
-      summary: Create invitation to personal list
+      summary: Create invitation to personal list (deferred to v1.x, ADR 015)
       requestBody:
         required: true
         content:

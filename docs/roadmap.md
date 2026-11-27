@@ -15,7 +15,7 @@ This file is the single implementation-progress source of truth. Work is organis
 
 ## Current state (2026-11-27)
 
-- **Done:** monorepo layout, Rust workspace crates, architecture checker with negative fixture tests, CI (backend fmt/Clippy/tests/architecture, Angular build + Playwright E2E/screenshot capture, Terraform fmt/validate, yamllint + Redocly OpenAPI lint, agent-config check), personal-list and item domain/application use cases, shared repository contract suite against an in-memory reference adapter, Axum router with fail-closed auth gate, Cognito access-token verification with JWKS caching and a `VerifiedActor` that can only be created from verified claims.
+- **Done:** monorepo layout, Rust workspace crates, architecture checker with negative fixture tests, CI (backend fmt/Clippy/tests/architecture, Angular build + Playwright E2E/screenshot capture, Terraform fmt/validate, yamllint + Redocly OpenAPI lint, agent-config check), personal-list and item domain/application use cases, shared repository contract suite against an in-memory reference adapter, Axum router with fail-closed auth gate, Cognito access-token verification with JWKS caching and a `VerifiedActor` that can only be created from verified claims, asynchronous `Send + Sync` repository ports (ADR 014), list access model (ADR 015) with access-scoped list/item ports and shared-access contract scenarios.
 - **Not started:** DynamoDB adapter, Lambda entry point/binary, any provisioned AWS resource (Terraform roots contain only version pins), deployment pipeline, Angular feature code, authentication UI.
 - **Implication:** no request has yet travelled browser → API → database. Phase A closes that gap before more domain features are added.
 
@@ -30,7 +30,7 @@ This file is the single implementation-progress source of truth. Work is organis
 - Backend persistence isolated behind ports so DynamoDB can be replaced.
 - Privacy basics required for an EU deployment (account deletion, data export, privacy notice).
 
-**Open scope decision (Phase C entry):** whether explicit sharing of individual personal lists ships in v1 or v1.x. Both sharing models together roughly double the authorization matrix. Decide in the access-model ADR (C1); until then explicit list sharing remains in scope but is sequenced after households.
+**Scope decision (ADR 015):** v1 collaboration is household-based. Explicit sharing of individual personal lists and personal-list invitations are deferred to v1.x.
 
 ## Initial product limits (configurable)
 
@@ -53,7 +53,7 @@ Goal: the thinnest end-to-end path, deployed to dev without manual console steps
 - [ ] **A2 Minimal dev infrastructure:** modules for DynamoDB PK/SK table, Cognito User Pool + public app client, ARM64 Lambda custom runtime + Function URL, private S3 + CloudFront/OAC, least-privilege Lambda IAM, log retention. Set reserved Lambda concurrency from the start as the first cost/abuse guard.
 - [ ] **A3 GitHub OIDC and deploy workflow:** OIDC role(s) with least privilege (separate plan/apply where practical), PR plan workflow, dev apply, build of Rust Lambda artifact and Angular assets, commit SHA recorded on the deployment.
 - [ ] **A4 Lambda entry point and composition root:** Lambda binary wiring `ApiState::from_cognito_env`, the DynamoDB adapter and an ID generator; abort startup on configuration errors; exact-origin CORS for the CloudFront domain.
-- [ ] **A5 DynamoDB adapter for personal lists:** implements the list port (create with owner index, list for owner, rename, delete with item cascade) using conditional writes/transactions; passes the shared list contract suite against DynamoDB Local or an equivalent in CI, plus adapter-specific transaction/conditional-write tests.
+- [ ] **A5 DynamoDB adapter for personal lists:** implements the list port (create with owner index, list accessible lists, rename, delete with item cascade) with access resolution and atomic enforcement per ADR 015, using conditional writes/transactions; passes the shared list contract suite against DynamoDB Local or an equivalent in CI, plus adapter-specific transaction/conditional-write tests.
 - [ ] **A6 HTTP routes for personal lists:** create/list routes complete; add rename/delete routes with expected-version handling and 401/403/404/409 contract tests aligned with OpenAPI.
 - [ ] **A7 Angular sign-in and list overview:** Cognito hosted UI or SDK flow (Authorization Code + PKCE), token handling per `docs/security.md`, protected routes, list overview with create; Playwright E2E with reviewed visual baselines for signed-out, empty and populated states.
 - [ ] **A8 Deployed smoke test:** automated smoke test against dev (health, authenticated create/list) run by the deploy workflow; documented rollback.
@@ -81,11 +81,11 @@ Goal: two users collaborate on household lists through an invitation link.
 
 **Exit criterion:** user A creates a household and invitation, user B accepts it in another browser and both edit the same household list; the authorization matrix (owner/member/non-member/unauthenticated) passes for every endpoint.
 
-- [ ] **C1 Access-model ADR (before any household code):** how a principal gains access to a list (owner, household member, explicit list member), how ports express it (replace owner-only scoping such as `list_personal_for_owner`), DynamoDB access patterns, and the v1/v1.x decision on explicit list sharing. Refactor existing list/item ports and contract scenarios to the chosen model.
-- [ ] **C2 Households:** create/list/get/rename, membership model, household-owned lists, owner/member policies.
+- [x] **C1 Access-model ADR (before any household code):** ADR 015 decides access through personal ownership or household membership, defers explicit list sharing to v1.x, defines the Administrator/Contributor rule table and sketches DynamoDB access patterns. List/item ports take a `ListAccessRequest` (principal + required permission); `list_personal_for_owner` became `list_accessible`; contract scenarios include `run_shared_access_contract`. Evidence: `make test-workspace` and `make check` output in the implementing PR.
+- [ ] **C2 Households:** create/list/get/rename, membership model, household-owned lists, owner/member policies, per-user household limit; add the household-membership path to adapter access resolution (ADR 015) and pass `run_shared_access_contract` via real household membership in every adapter.
 - [ ] **C3 Membership lifecycle:** leave household, owner transfer before owner departure, bounded deletion/cascade strategy with tests.
 - [ ] **C4 Invitations:** ≥256-bit random tokens, store hash only, atomic use count/revocation/expiry, authenticated acceptance, limits from "Initial product limits", stable HTTPS URLs compatible with Android App Links, web route with fallback.
-- [ ] **C5 Explicit list sharing** (only if C1 keeps it in v1).
+- [ ] **C5 Explicit list sharing — deferred to v1.x (ADR 015).** Not part of v1; adds a Contributor access source via explicit list membership and personal-list invitations.
 - [ ] **C6 Angular household and invitation flows** with visual baselines.
 - Evidence: authorization matrix report, transaction and race-condition tests (invitation use count), token security tests, invitation E2E flow, screenshot report.
 
@@ -142,7 +142,7 @@ Detail of finished work that later phases rely on.
 ### Personal lists
 
 - Domain types for list/user identifiers, validated list names and personal shopping lists; new lists start at version 1.
-- Create, list, rename and delete use cases scoped to the actor, with validated `AggregateVersion`.
+- Create (personal) plus access-scoped list, rename and delete use cases (`ListAccessibleLists`, `RenameShoppingList`, `DeleteShoppingList`) with validated `AggregateVersion`; rename/delete require Administer permission (ADR 015).
 - Rename increments the version only on a real name change; stale expected versions conflict before no-op detection; version exhaustion is an explicit error; repeated delete returns `NotFound`.
 
 ### Items
@@ -153,10 +153,11 @@ Detail of finished work that later phases rely on.
 
 ### Repository contract suite
 
-- Shared scenarios provision their own fixtures and run against the application-owned ports; enable the adapters crate's `test-support` feature and invoke both contracts with a fresh `ShoppingListRepository`/`ShoppingItemRepository` pair.
-- Lists: owner scoping, duplicate create, non-disclosure to unauthorized actors, stale no-op rename, stale delete, version increments, repeated delete, item cascade on list deletion.
+- Shared scenarios provision their own fixtures and run against the application-owned ports; enable the adapters crate's `test-support` feature and invoke the list, item and shared-access contracts with fresh `ShoppingListRepository`/`ShoppingItemRepository` instances (plus a `SharedListFixture` for shared access).
+- Lists: access-based listing (all owned lists, never foreign ones), duplicate create, non-disclosure to unauthorized actors, stale no-op rename, stale delete, version increments, repeated delete, item cascade on list deletion.
 - Items: unauthorized actor, duplicate item ID, stale list/item versions, check/uncheck transitions, idempotent check, version semantics, 100-active-item limit, repository-assigned unique positions, repeated-delete `NotFound`. Capacity and ordering are verified through `list_items`, not adapter-only helpers.
-- Limitation: the in-memory adapter is single-threaded (`RefCell`, `!Sync`) and proves neither durability nor production concurrency. The DynamoDB adapter adds transaction/conditional-write integration tests (A5, B1).
+- Shared access (ADR 015): contributors use list content but get `Forbidden` for rename/delete (also with stale versions), outsiders get `NotFound` everywhere, the requested permission is enforced generically and revocation applies on the next request. Lists are provisioned through the `SharedListFixture` test-support trait.
+- Scenarios are async (ADR 014). The in-memory adapter serializes every operation behind one `Mutex` (`Send + Sync`); a multi-threaded test proves that parallel writers with the same expected version commit exactly once. It proves neither durability nor database transaction behaviour; the DynamoDB adapter adds transaction/conditional-write integration tests (A5, B1).
 
 ### HTTP and authentication
 
@@ -184,7 +185,7 @@ Per work item:
 - Acceptance criteria are met and evidence is linked in the PR.
 - CI checks pass; no knowingly failing required check is waived silently.
 - OpenAPI schema validates; breaking changes are reviewed.
-- New endpoints have authorization tests for owner/member/non-member (once the access model exists: all roles it defines).
+- New endpoints have authorization tests for administrator/contributor/no access/unauthenticated (ADR 015).
 - Domain/application behavior is tested without a live database; persistence adapter contract tests pass.
 - Multi-record writes are atomic or have documented consistency semantics.
 - UI changes have reviewed visual regression results; baseline changes are intentional and approved.
