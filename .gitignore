@@ -1,5 +1,6 @@
 # Rust
 /target/
+/backend/target/
 **/*.rs.bk
 
 # Angular / Node
@@ -40,3 +41,7 @@ Thumbs.db
 
 # Claude Code local overrides
 .claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
