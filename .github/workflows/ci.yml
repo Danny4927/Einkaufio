@@ -24,8 +24,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.1
       - name: Backend verification
         run: make ci-backend
+      - name: Dependency policy (licenses, advisories, bans, sources)
+        run: make deny
 
   web:
     name: web / lint-unit-build-e2e-visual-capture

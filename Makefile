@@ -3,7 +3,7 @@ WEB_DIR := apps/web
 TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -exec dirname {} \; | sort -u)
 PLAYWRIGHT_INSTALL ?= npx playwright install chromium
 
-.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate terraform-scan web-install web-lint web-test web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
+.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture deny terraform-fmt terraform-validate terraform-scan web-install web-lint web-test web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
 
 check: fmt lint test-workspace architecture terraform-fmt yaml-lint
 verify: ci-backend ci-web ci-terraform ci-contracts agent-config-check
@@ -40,6 +40,8 @@ web-e2e-setup:
 	cd $(WEB_DIR) && npx playwright install chromium
 web-e2e: web-install web-e2e-setup
 	cd $(WEB_DIR) && npm run e2e
+deny:
+	cargo deny --manifest-path backend/Cargo.toml check
 terraform-fmt:
 	terraform fmt -check -recursive infra/terraform
 terraform-validate:

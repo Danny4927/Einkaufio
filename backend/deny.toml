@@ -1,0 +1,54 @@
+# cargo-deny policy for the Rust workspace in backend/.
+# Run with: make deny  (cargo deny --manifest-path backend/Cargo.toml check)
+# Keep the cargo-deny version used in CI (.github/workflows/ci.yml) in sync with local installs.
+
+[graph]
+all-features = true
+targets = [
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+
+[advisories]
+version = 2
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+  # rsa is only a dev-dependency of einkaufio-api, used to sign test JWTs with
+  # locally generated keys. The Marvin timing side channel requires an attacker
+  # observing production decryption/signing timing; no production path uses rsa.
+  # Revisit when rsa 0.10 is stable.
+  { id = "RUSTSEC-2023-0071", reason = "dev-only test JWT signing; not reachable in production" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Only licenses that occur in the current dependency graph are allowed.
+# Add a license here only after reviewing it; do not allow broad categories.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+# Workspace crates are unpublished (publish = false) and carry no license field.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
