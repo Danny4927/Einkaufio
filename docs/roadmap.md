@@ -143,8 +143,10 @@ These are initial product/abuse-control limits, not permanent technical constrai
 ### M2 – Authentication/profile
 
 - [ ] Cognito register/sign-in/password reset.
-- [ ] Rust JWT verification with JWKS caching and key rotation.
-- [ ] Derive principal from verified sub.
+- [ ] Rust JWT verification with JWKS caching, bounded refresh, single-flight refresh and key rotation.
+- [ ] Derive principal from verified sub; protect personal-list routes with a verified actor.
+- [ ] Add deterministic signed-token and middleware tests (valid, malformed, invalid signature/claims, key rotation, JWKS outage).
+- [ ] Wire Cognito settings into the Lambda/runtime composition root and Terraform environment.
 - [ ] Create/read/update profile via application use cases and profile repository port.
 - [ ] Angular auth flow and protected routes.
 - [ ] Tests for invalid, expired and wrong-use JWTs.
