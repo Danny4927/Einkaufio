@@ -40,3 +40,9 @@ Thumbs.db
 
 # Claude Code local overrides
 .claude/settings.local.json
+
+# Rust build output
+/backend/target/
+
+# Python
+__pycache__/
