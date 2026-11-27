@@ -39,25 +39,32 @@ paths:
   /api/me:
     get:
       tags: [Profile]
-      summary: Get current profile
+      summary: Get the caller's profile
       responses:
         '200':
           description: Profile
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UserProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-    patch:
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
       tags: [Profile]
-      summary: Update current profile
+      summary: Create (no expectedVersion) or update (with expectedVersion) the caller's profile
+      description: The profile id is always the verified principal; it cannot be supplied.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [displayName]
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 80 }
+                expectedVersion: { type: integer, minimum: 1 }
               additionalProperties: false
       responses:
         '200':
@@ -65,6 +72,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UserProfile' }
+        '201':
+          description: Created profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists:
     get:
       tags: [Lists]
@@ -81,8 +100,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ListPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     post:
       tags: [Lists]
       summary: Create a personal list
@@ -102,27 +123,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ShoppingListSummary' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists/{listId}:
     parameters:
       - $ref: '#/components/parameters/ListId'
-    get:
-      tags: [Lists]
-      summary: Get list metadata and item page
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Shopping list
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ShoppingList' }
-        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Lists]
-      summary: Rename a list (owner/admin only)
+      summary: Rename a list (administrator only)
+      description: Contributors receive 403; callers without access receive 404 (no existence leak).
       requestBody:
         required: true
         content:
@@ -135,21 +147,57 @@ paths:
                 expectedVersion: { type: integer, minimum: 1 }
               additionalProperties: false
       responses:
-        '200': { description: Updated }
+        '200':
+          description: Renamed list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShoppingListSummary' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     delete:
       tags: [Lists]
-      summary: Delete a list (owner/admin only)
+      summary: Delete a list and its items (administrator only)
+      parameters:
+        - $ref: '#/components/parameters/ExpectedVersion'
       responses:
         '204': { description: Deleted }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists/{listId}/items:
     parameters:
       - $ref: '#/components/parameters/ListId'
+    get:
+      tags: [Items]
+      summary: Page through the items of a list in position order
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Item page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     post:
       tags: [Items]
-      summary: Add an item
+      summary: Add an item with the expected list version
       requestBody:
         required: true
         content:
@@ -157,20 +205,28 @@ paths:
             schema: { $ref: '#/components/schemas/CreateItemRequest' }
       responses:
         '201':
-          description: Created item
+          description: Created item and new list version
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ShoppingItem' }
+              schema: { $ref: '#/components/schemas/ItemMutationResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists/{listId}/items/{itemId}:
     parameters:
       - $ref: '#/components/parameters/ListId'
-      - name: itemId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/ItemId'
     patch:
       tags: [Items]
-      summary: Update item with optimistic concurrency
+      summary: Check/uncheck or update item details with optimistic concurrency
+      description: |
+        Send either `checked` alone, or `name` with optional `quantity`, `unit` and `note`.
+        Mixing both or sending neither is rejected with 400.
       requestBody:
         required: true
         content:
@@ -178,22 +234,78 @@ paths:
             schema: { $ref: '#/components/schemas/UpdateItemRequest' }
       responses:
         '200':
-          description: Updated item
+          description: Updated item and new list version
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ShoppingItem' }
+              schema: { $ref: '#/components/schemas/ItemMutationResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     delete:
       tags: [Items]
       summary: Delete item with optimistic concurrency
       parameters:
-        - name: expectedVersion
-          in: query
-          required: true
-          schema: { type: integer, minimum: 1 }
+        - $ref: '#/components/parameters/ExpectedVersion'
       responses:
-        '204': { description: Deleted }
+        '200':
+          description: Deleted; new list version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListVersion' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/lists/{listId}/item-order:
+    parameters:
+      - $ref: '#/components/parameters/ListId'
+    put:
+      tags: [Items]
+      summary: Reorder items; index n in itemIds becomes position n
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedListVersion, itemIds]
+              properties:
+                expectedListVersion: { type: integer, minimum: 1 }
+                itemIds:
+                  type: array
+                  maxItems: 100
+                  uniqueItems: true
+                  items: { type: string }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Reordered items and new list version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, listVersion]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ShoppingItem' }
+                  listVersion: { type: integer, minimum: 1 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/households:
     get:
       tags: [Households]
@@ -382,14 +494,14 @@ paths:
   /api/lists/{listId}/sync:
     parameters:
       - $ref: '#/components/parameters/ListId'
-      - name: sinceVersion
+      - name: since
         in: query
-        required: true
-        schema: { type: integer, minimum: 0 }
-      - $ref: '#/components/parameters/Cursor'
+        required: false
+        description: Last list version the client holds; omit for a full snapshot.
+        schema: { type: integer, minimum: 1 }
     get:
       tags: [Sync]
-      summary: Poll list; return item snapshot only when the version changed
+      summary: Poll a list; returns a snapshot or the changes since a version
       responses:
         '200':
           description: Sync result
@@ -397,6 +509,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SyncResponse' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 components:
   securitySchemes:
     CognitoAccessToken:
@@ -413,7 +530,18 @@ components:
     Cursor:
       name: cursor
       in: query
-      schema: { type: string }
+      description: Opaque cursor from a previous page's nextCursor.
+      schema: { type: string, minLength: 1, maxLength: 512 }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    ExpectedVersion:
+      name: expectedVersion
+      in: query
+      required: true
+      schema: { type: integer, minimum: 1 }
     Limit:
       name: limit
       in: query
@@ -432,11 +560,11 @@ components:
             requestId: { type: string }
     UserProfile:
       type: object
-      required: [id, displayName]
+      required: [id, displayName, version]
       properties:
         id: { type: string }
-        displayName: { type: string }
-        email: { type: string, format: email }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        version: { type: integer, minimum: 1 }
     ShoppingListSummary:
       type: object
       required: [id, name, type, role, version]
@@ -460,39 +588,55 @@ components:
             nextCursor: { type: string }
     ShoppingItem:
       type: object
-      required: [id, name, checked, itemVersion]
+      required: [id, name, checked, position, itemVersion]
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string, minLength: 1, maxLength: 160 }
-        quantity: { type: number, exclusiveMinimum: 0 }
+        id: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        quantity: { type: string, maxLength: 40 }
         unit: { type: string, maxLength: 40 }
         note: { type: string, maxLength: 500 }
         checked: { type: boolean }
-        position: { type: number }
+        position: { type: integer, minimum: 0 }
         itemVersion: { type: integer, minimum: 1 }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+    ItemPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ShoppingItem' }
+        nextCursor: { type: string }
+    ItemMutationResult:
+      type: object
+      required: [item, listVersion]
+      properties:
+        item: { $ref: '#/components/schemas/ShoppingItem' }
+        listVersion: { type: integer, minimum: 1 }
+    ListVersion:
+      type: object
+      required: [listVersion]
+      properties:
+        listVersion: { type: integer, minimum: 1 }
     CreateItemRequest:
       type: object
-      required: [name]
+      required: [expectedListVersion, name]
       properties:
-        name: { type: string, minLength: 1, maxLength: 160 }
-        quantity: { type: number, exclusiveMinimum: 0 }
+        expectedListVersion: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        quantity: { type: string, maxLength: 40 }
         unit: { type: string, maxLength: 40 }
         note: { type: string, maxLength: 500 }
-        position: { type: number }
       additionalProperties: false
     UpdateItemRequest:
       type: object
       required: [expectedVersion]
       properties:
-        expectedVersion: { type: integer, minimum: 1 }
-        name: { type: string, minLength: 1, maxLength: 160 }
-        quantity: { type: number, exclusiveMinimum: 0 }
+        expectedVersion: { type: integer, minimum: 1, description: Expected item version }
+        checked: { type: boolean }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        quantity: { type: string, maxLength: 40 }
         unit: { type: string, maxLength: 40 }
         note: { type: string, maxLength: 500 }
-        checked: { type: boolean }
-        position: { type: number }
       additionalProperties: false
     HouseholdSummary:
       type: object
@@ -540,30 +684,35 @@ components:
     SyncResponse:
       oneOf:
         - type: object
-          required: [changed, version]
+          required: [kind, version, list, items]
           properties:
-            changed: { type: boolean, const: false }
-            version: { type: integer }
-        - type: object
-          required: [changed, version, items]
-          properties:
-            changed: { type: boolean, const: true }
-            version: { type: integer }
+            kind: { type: string, const: snapshot }
+            version: { type: integer, minimum: 1 }
+            list: { $ref: '#/components/schemas/ShoppingListSummary' }
             items:
               type: array
               items: { $ref: '#/components/schemas/ShoppingItem' }
-            nextCursor: { type: string }
+        - type: object
+          required: [kind, version, since, list, changed, removed]
+          properties:
+            kind: { type: string, const: changes }
+            version: { type: integer, minimum: 1 }
+            since: { type: integer, minimum: 1 }
+            list: { $ref: '#/components/schemas/ShoppingListSummary' }
+            changed:
+              type: array
+              items: { $ref: '#/components/schemas/ShoppingItem' }
+            removed:
+              type: array
+              items: { type: string }
+      discriminator:
+        propertyName: kind
   responses:
     Unauthorized:
       description: Missing or invalid authentication
       headers:
         WWW-Authenticate:
           schema: { type: string }
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
-    AuthenticationUnavailable:
-      description: Authentication configuration or Cognito JWKS service is unavailable
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -579,6 +728,26 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     Conflict:
       description: Optimistic concurrency conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Invalid input (validation, query parameters or unsupported combination)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: Request body exceeds 16 KiB
+    TooManyRequests:
+      description: Per-principal request budget exhausted (ADR 016)
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServiceUnavailable:
+      description: Authentication, persistence or throttling is unavailable (fail closed)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

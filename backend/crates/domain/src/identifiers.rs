@@ -14,6 +14,16 @@ pub struct UserId(String);
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ItemId(String);
 
+/// A stable identifier for a household (roadmap C2).
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct HouseholdId(String);
+
+/// A stable, non-secret identifier for a household invitation (roadmap C4).
+///
+/// Never derived from the invitation token: the id is safe to show and log, the token is not.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct InvitationId(String);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentifierError {
     Empty,
@@ -54,6 +64,8 @@ macro_rules! identifier {
 identifier!(ListId);
 identifier!(UserId);
 identifier!(ItemId);
+identifier!(HouseholdId);
+identifier!(InvitationId);
 
 #[cfg(test)]
 mod tests {

@@ -10,6 +10,8 @@ test-support = []
 [dependencies]
 einkaufio-application = { path = "../application" }
 einkaufio-domain = { path = "../domain" }
+# CSPRNG and SHA-256 for invitation tokens (ADR 017); already in the graph via rustls.
+ring = "0.17"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

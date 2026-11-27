@@ -124,7 +124,10 @@ mod tests {
             .expect("list should be created");
 
         assert_eq!(created.id().as_str(), "list-123");
-        assert_eq!(created.owner_id().as_str(), "authenticated-user-1");
+        assert_eq!(
+            created.personal_owner().map(|owner| owner.as_str()),
+            Some("authenticated-user-1")
+        );
         assert_eq!(created.name().as_str(), "Wocheneinkauf");
         assert_eq!(created.version(), 1);
         assert_eq!(repository.created.lock().unwrap().len(), 1);

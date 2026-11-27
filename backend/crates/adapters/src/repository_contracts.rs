@@ -5,17 +5,18 @@
 //! Scenarios are async (ADR 014) and need no specific runtime; adapters drive them from their
 //! own async tests. Access scoping follows ADR 015.
 
-use std::future::Future;
-
 use std::collections::BTreeMap;
 
 use einkaufio_application::{
+    HouseholdAccessRequest, HouseholdRepository, HouseholdRepositoryError, InvitationRepository,
     ListAccessRequest, ListSync, PageCursor, PageRequest, PageSize, ProfileRepository,
     RepositoryError, ShoppingItemRepository, ShoppingListRepository,
 };
 use einkaufio_domain::{
-    AggregateVersion, DisplayName, ItemDetails, ItemId, ItemName, ItemNote, ItemOrder, ListId,
-    ListName, ListOperation, ListPermission, ShoppingItem, ShoppingList, UserId, UserProfile,
+    AggregateVersion, DisplayName, Household, HouseholdId, HouseholdName, HouseholdOperation,
+    HouseholdPermission, Invitation, InvitationId, InvitationLifetime, InvitationMaxUses,
+    InvitationTokenHash, ItemDetails, ItemId, ItemName, ItemNote, ItemOrder, ListId, ListName,
+    ListOperation, ListPermission, ShoppingItem, ShoppingList, Timestamp, UserId, UserProfile,
 };
 
 fn user(value: &str) -> UserId {
@@ -58,27 +59,149 @@ fn sorted(mut lists: Vec<ShoppingList>) -> Vec<ShoppingList> {
     lists
 }
 
-/// Provisions lists on which a principal holds contributor (non-ownership) access.
-///
-/// Until households exist the in-memory adapter grants contributor access directly. From
-/// roadmap C2 a persistent adapter implements this through the production access path:
-/// create a household administered by `list.owner_id()`, add `contributor` as an active member
-/// and create `list` as a household-owned list. Implementations must not add an access path
-/// that production code cannot reach.
-pub trait SharedListFixture: Send + Sync {
-    /// Persists `list`, administered by `list.owner_id()`, with `contributor` as contributor.
-    fn provision_shared_list(
-        &self,
-        list: ShoppingList,
-        contributor: &UserId,
-    ) -> impl Future<Output = Result<(), RepositoryError>> + Send;
+/// Household and invitation ports implemented by one adapter (they share memberships).
+pub trait HouseholdStore: HouseholdRepository + InvitationRepository {}
 
-    /// Removes the contributor's access (in C2: ends the household membership).
-    fn revoke_contributor(
-        &self,
-        list_id: &ListId,
-        contributor: &UserId,
-    ) -> impl Future<Output = Result<(), RepositoryError>> + Send;
+impl<T: HouseholdRepository + InvitationRepository> HouseholdStore for T {}
+
+pub(crate) fn household_id(value: &str) -> HouseholdId {
+    HouseholdId::try_new(value).expect("valid test household id")
+}
+pub(crate) fn at(seconds: u64) -> Timestamp {
+    Timestamp::from_unix_seconds(seconds)
+}
+fn household(id: &str, owner: &str, name: &str) -> Household {
+    Household::new(
+        household_id(id),
+        user(owner),
+        HouseholdName::try_new(name).unwrap(),
+    )
+}
+fn household_list(id: &str, household: &str, name: &str) -> ShoppingList {
+    ShoppingList::new_household(
+        list_id(id),
+        household_id(household),
+        ListName::try_new(name).unwrap(),
+    )
+}
+pub(crate) fn household_access(
+    principal: &UserId,
+    operation: HouseholdOperation,
+) -> HouseholdAccessRequest {
+    HouseholdAccessRequest::for_operation(principal.clone(), operation)
+}
+/// A deterministic stand-in for SHA-256(token): contracts never handle raw tokens.
+pub(crate) fn token_hash(seed: &str) -> InvitationTokenHash {
+    let mut bytes = [0_u8; 32];
+    for (index, byte) in seed.bytes().cycle().take(32).enumerate() {
+        bytes[index] = byte.wrapping_add(u8::try_from(index).unwrap_or(0));
+    }
+    InvitationTokenHash::from_bytes(bytes)
+}
+/// An invitation issued at t=1000 for one hour (expires at t=4600).
+pub(crate) fn invitation(
+    id: &str,
+    household: &str,
+    creator: &str,
+    seed: &str,
+    max_uses: u32,
+) -> Invitation {
+    Invitation::new(
+        InvitationId::try_new(id).unwrap(),
+        household_id(household),
+        user(creator),
+        token_hash(seed),
+        at(1_000),
+        InvitationLifetime::try_from_seconds(3_600).unwrap(),
+        InvitationMaxUses::try_new(max_uses).unwrap(),
+    )
+    .unwrap()
+}
+pub(crate) const NOW: u64 = 2_000;
+pub(crate) const EXPIRES: u64 = 4_600;
+
+/// Creates a household owned by `owner` and makes each of `members` an active member through
+/// the production path (owner invitation + authenticated acceptance).
+pub async fn provision_household(
+    households: &impl HouseholdStore,
+    id: &str,
+    owner: &str,
+    members: &[&str],
+) -> Household {
+    households
+        .create_household(household(id, owner, "Haushalt"))
+        .await
+        .expect("create household");
+    if !members.is_empty() {
+        let seed = format!("provision-{id}");
+        households
+            .create_invitation(
+                &household_access(&user(owner), HouseholdOperation::ManageInvitations),
+                invitation(
+                    &format!("{id}-provision"),
+                    id,
+                    owner,
+                    &seed,
+                    u32::try_from(members.len()).unwrap(),
+                ),
+                at(NOW),
+            )
+            .await
+            .expect("create provisioning invitation");
+        for member in members {
+            households
+                .accept_invitation(&user(member), &token_hash(&seed), at(NOW))
+                .await
+                .expect("accept provisioning invitation");
+        }
+    }
+    households
+        .get_household(
+            &household_access(&user(owner), HouseholdOperation::View),
+            &household_id(id),
+        )
+        .await
+        .expect("read provisioned household")
+        .household
+}
+
+/// Provisions a household-owned list administered by `administrator` (household owner) with
+/// `contributor` as active member. Uses production port operations only (ADR 015).
+async fn provision_shared_list(
+    households: &impl HouseholdStore,
+    household: &str,
+    list: &str,
+    administrator: &UserId,
+    contributor: &UserId,
+) -> ShoppingList {
+    provision_household(
+        households,
+        household,
+        administrator.as_str(),
+        &[contributor.as_str()],
+    )
+    .await;
+    let shared = household_list(list, household, "Gemeinsam");
+    households
+        .create_household_list(
+            &household_access(administrator, HouseholdOperation::CreateList),
+            shared.clone(),
+        )
+        .await
+        .expect("create household list");
+    shared
+}
+
+/// Ends the contributor's access by leaving the household.
+async fn revoke_contributor(
+    households: &impl HouseholdStore,
+    household: &str,
+    contributor: &UserId,
+) {
+    households
+        .leave_household(contributor, &household_id(household))
+        .await
+        .expect("leave household");
 }
 
 /// Runs list and cascade scenarios against a fresh pair of repositories.
@@ -496,16 +619,19 @@ pub async fn run_shopping_item_contract(
 pub async fn run_shared_access_contract(
     lists: &impl ShoppingListRepository,
     items: &impl ShoppingItemRepository,
-    fixture: &impl SharedListFixture,
+    households: &impl HouseholdStore,
 ) {
     let administrator = user("shared-admin");
     let contributor = user("shared-contributor");
     let outsider = user("shared-outsider");
-    let shared = list("shared-list", "shared-admin", "Gemeinsam");
-    fixture
-        .provision_shared_list(shared.clone(), &contributor)
-        .await
-        .expect("provision shared list");
+    let shared = provision_shared_list(
+        households,
+        "shared-household",
+        "shared-list",
+        &administrator,
+        &contributor,
+    )
+    .await;
 
     assert_eq!(
         lists.list_accessible(&administrator).await.unwrap(),
@@ -653,10 +779,7 @@ pub async fn run_shared_access_contract(
 
     // Persisted access is re-checked on every request: revocation takes effect immediately and
     // the former contributor is treated exactly like an outsider.
-    fixture
-        .revoke_contributor(shared.id(), &contributor)
-        .await
-        .expect("revoke contributor");
+    revoke_contributor(households, "shared-household", &contributor).await;
     assert!(
         lists
             .list_accessible(&contributor)
@@ -1179,16 +1302,19 @@ pub async fn run_sync_contract(
 pub async fn run_shared_query_contract(
     lists: &impl ShoppingListRepository,
     items: &impl ShoppingItemRepository,
-    fixture: &impl SharedListFixture,
+    households: &impl HouseholdStore,
 ) {
     let administrator = user("query-admin");
     let contributor = user("query-contributor");
     let outsider = user("query-outsider");
-    let shared = list("query-shared", "query-admin", "Gemeinsam");
-    fixture
-        .provision_shared_list(shared.clone(), &contributor)
-        .await
-        .expect("provision");
+    let shared = provision_shared_list(
+        households,
+        "query-household",
+        "query-shared",
+        &administrator,
+        &contributor,
+    )
+    .await;
     let v3 = add_items(items, &administrator, shared.id(), "q", 2, version(1)).await;
 
     let contributor_page = lists
@@ -1259,10 +1385,7 @@ pub async fn run_shared_query_contract(
         Err(RepositoryError::NotFound)
     );
 
-    fixture
-        .revoke_contributor(shared.id(), &contributor)
-        .await
-        .expect("revoke");
+    revoke_contributor(households, "query-household", &contributor).await;
     assert_eq!(
         items
             .sync_list(&reader(&contributor), shared.id(), Some(v4))
@@ -1358,6 +1481,940 @@ pub async fn run_profile_contract(profiles: &impl ProfileRepository) {
     );
 }
 
+fn admin(principal: &UserId, operation: HouseholdOperation) -> HouseholdAccessRequest {
+    household_access(principal, operation)
+}
+
+/// Runs household scenarios (roadmap C2): creation and listing, owner/member/outsider
+/// authorization, optimistic concurrency, household-owned lists and the per-user household
+/// and per-household list limits.
+pub async fn run_household_contract(
+    lists: &impl ShoppingListRepository,
+    items: &impl ShoppingItemRepository,
+    households: &impl HouseholdStore,
+) {
+    let owner = user("hh-owner");
+    let member = user("hh-member");
+    let outsider = user("hh-outsider");
+    let created = provision_household(households, "hh-1", "hh-owner", &["hh-member"]).await;
+    // One accepted membership advanced the household version.
+    assert_eq!(created.version(), version(2));
+    assert_eq!(
+        households
+            .create_household(household("hh-1", "hh-outsider", "Kopie"))
+            .await,
+        Err(HouseholdRepositoryError::AlreadyExists)
+    );
+
+    let owned = households.list_households(&owner).await.unwrap();
+    assert_eq!(owned.len(), 1);
+    assert_eq!(owned[0].household, created);
+    assert_eq!(owned[0].role, einkaufio_domain::HouseholdRole::Owner);
+    let joined = households.list_households(&member).await.unwrap();
+    assert_eq!(joined[0].role, einkaufio_domain::HouseholdRole::Member);
+    assert!(
+        households
+            .list_households(&outsider)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let details = households
+        .get_household(&admin(&member, HouseholdOperation::View), created.id())
+        .await
+        .unwrap();
+    let roster: Vec<_> = details
+        .members
+        .iter()
+        .map(|entry| (entry.user_id.as_str(), entry.role))
+        .collect();
+    assert_eq!(
+        roster,
+        vec![
+            ("hh-member", einkaufio_domain::HouseholdRole::Member),
+            ("hh-owner", einkaufio_domain::HouseholdRole::Owner),
+        ]
+    );
+    // Outsiders cannot tell an existing household from a missing one.
+    for id in [created.id().clone(), household_id("hh-missing")] {
+        assert_eq!(
+            households
+                .get_household(&admin(&outsider, HouseholdOperation::View), &id)
+                .await,
+            Err(HouseholdRepositoryError::NotFound)
+        );
+        assert_eq!(
+            households
+                .rename_household(
+                    &admin(&outsider, HouseholdOperation::Rename),
+                    &id,
+                    version(2),
+                    HouseholdName::try_new("X").unwrap()
+                )
+                .await,
+            Err(HouseholdRepositoryError::NotFound)
+        );
+    }
+
+    // Members cannot administer, even with a stale version (authorization first). Adapters
+    // enforce the requested permission generically.
+    for expected in [version(2), version(1)] {
+        assert_eq!(
+            households
+                .rename_household(
+                    &admin(&member, HouseholdOperation::Rename),
+                    created.id(),
+                    expected,
+                    HouseholdName::try_new("Übernommen").unwrap()
+                )
+                .await,
+            Err(HouseholdRepositoryError::Forbidden)
+        );
+    }
+    assert_eq!(
+        households
+            .get_household(
+                &HouseholdAccessRequest::new(member.clone(), HouseholdPermission::Administer),
+                created.id()
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    // Stale versions conflict before no-op detection.
+    assert_eq!(
+        households
+            .rename_household(
+                &admin(&owner, HouseholdOperation::Rename),
+                created.id(),
+                version(1),
+                HouseholdName::try_new("Haushalt").unwrap()
+            )
+            .await,
+        Err(HouseholdRepositoryError::Conflict)
+    );
+    let renamed = households
+        .rename_household(
+            &admin(&owner, HouseholdOperation::Rename),
+            created.id(),
+            version(2),
+            HouseholdName::try_new("Familie").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.version(), version(3));
+    assert_eq!(renamed.name().as_str(), "Familie");
+
+    // Household lists: members may create them; outsiders cannot; personal lists are refused.
+    let by_member = household_list("hh-list-member", "hh-1", "Drogerie");
+    households
+        .create_household_list(
+            &admin(&member, HouseholdOperation::CreateList),
+            by_member.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .create_household_list(
+                &admin(&member, HouseholdOperation::CreateList),
+                by_member.clone()
+            )
+            .await,
+        Err(HouseholdRepositoryError::AlreadyExists)
+    );
+    assert_eq!(
+        households
+            .create_household_list(
+                &admin(&outsider, HouseholdOperation::CreateList),
+                household_list("hh-list-outsider", "hh-1", "X")
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .create_household_list(
+                &admin(&owner, HouseholdOperation::CreateList),
+                list("hh-list-personal", "hh-owner", "Privat")
+            )
+            .await,
+        Err(HouseholdRepositoryError::InvalidRequest)
+    );
+    let personal = list("hh-personal", "hh-member", "Privat");
+    lists.create_personal(personal.clone()).await.unwrap();
+
+    // Household lists are visible to every member, personal lists only to their owner.
+    assert_eq!(
+        sorted(lists.list_accessible(&member).await.unwrap()),
+        vec![by_member.clone(), personal.clone()]
+    );
+    assert_eq!(
+        lists.list_accessible(&owner).await.unwrap(),
+        vec![by_member.clone()]
+    );
+    assert!(lists.list_accessible(&outsider).await.unwrap().is_empty());
+    // The household owner administers household lists; members contribute.
+    assert_eq!(
+        items
+            .add_item(
+                &editor(&owner),
+                by_member.id(),
+                version(1),
+                item("hh-item", "hh-owner", 0)
+            )
+            .await,
+        Ok(version(2))
+    );
+    assert_eq!(
+        lists
+            .rename_list(
+                &renamer(&member),
+                by_member.id(),
+                version(2),
+                ListName::try_new("X").unwrap()
+            )
+            .await,
+        Err(RepositoryError::Forbidden)
+    );
+    assert_eq!(
+        lists
+            .rename_list(
+                &renamer(&owner),
+                by_member.id(),
+                version(2),
+                ListName::try_new("Drogeriemarkt").unwrap()
+            )
+            .await
+            .unwrap()
+            .version(),
+        3
+    );
+    // Household ownership never grants access to a member's personal list.
+    assert_eq!(
+        items.list_items(&reader(&owner), personal.id()).await,
+        Err(RepositoryError::NotFound)
+    );
+
+    // Per-household list limit (20), including lists created by members.
+    for index in 1..Household::MAX_LISTS {
+        households
+            .create_household_list(
+                &admin(&owner, HouseholdOperation::CreateList),
+                household_list(&format!("hh-list-{index}"), "hh-1", "Liste"),
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        households
+            .create_household_list(
+                &admin(&member, HouseholdOperation::CreateList),
+                household_list("hh-list-over", "hh-1", "Zu viel")
+            )
+            .await,
+        Err(HouseholdRepositoryError::ListLimitReached)
+    );
+    // Deleting a list frees a slot.
+    lists
+        .delete_list(&deleter(&owner), by_member.id(), version(3))
+        .await
+        .unwrap();
+    households
+        .create_household_list(
+            &admin(&member, HouseholdOperation::CreateList),
+            household_list("hh-list-over", "hh-1", "Wieder Platz"),
+        )
+        .await
+        .unwrap();
+
+    // Per-user household limit counts owned and joined households.
+    for index in 1..Household::MAX_HOUSEHOLDS_PER_USER {
+        households
+            .create_household(household(
+                &format!("hh-extra-{index}"),
+                "hh-member",
+                "Weitere",
+            ))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        households
+            .create_household(household("hh-extra-over", "hh-member", "Zu viel"))
+            .await,
+        Err(HouseholdRepositoryError::HouseholdLimitReached)
+    );
+    assert_eq!(
+        households.list_households(&member).await.unwrap().len(),
+        Household::MAX_HOUSEHOLDS_PER_USER
+    );
+}
+
+/// Runs membership lifecycle scenarios (roadmap C3): leaving, removal, owner transfer before
+/// owner departure, and household deletion cascading to lists, items and invitations.
+pub async fn run_membership_lifecycle_contract(
+    lists: &impl ShoppingListRepository,
+    items: &impl ShoppingItemRepository,
+    households: &impl HouseholdStore,
+) {
+    let owner = user("life-owner");
+    let member = user("life-member");
+    let second = user("life-second");
+    let outsider = user("life-outsider");
+    let home = provision_household(
+        households,
+        "life-1",
+        "life-owner",
+        &["life-member", "life-second"],
+    )
+    .await;
+    assert_eq!(home.version(), version(3));
+    let shared = household_list("life-list", "life-1", "Gemeinsam");
+    households
+        .create_household_list(
+            &admin(&owner, HouseholdOperation::CreateList),
+            shared.clone(),
+        )
+        .await
+        .unwrap();
+
+    // The owner cannot leave or be removed before transferring ownership.
+    assert_eq!(
+        households.leave_household(&owner, home.id()).await,
+        Err(HouseholdRepositoryError::OwnerMustTransferOwnership)
+    );
+    assert_eq!(
+        households
+            .remove_member(
+                &admin(&owner, HouseholdOperation::RemoveMember),
+                home.id(),
+                version(3),
+                &owner
+            )
+            .await,
+        Err(HouseholdRepositoryError::OwnerMustTransferOwnership)
+    );
+    assert_eq!(
+        households.leave_household(&outsider, home.id()).await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+
+    // Members cannot transfer or remove; outsiders learn nothing.
+    assert_eq!(
+        households
+            .transfer_ownership(
+                &admin(&member, HouseholdOperation::TransferOwnership),
+                home.id(),
+                version(1),
+                &member
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    assert_eq!(
+        households
+            .remove_member(
+                &admin(&member, HouseholdOperation::RemoveMember),
+                home.id(),
+                version(3),
+                &second
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    assert_eq!(
+        households
+            .transfer_ownership(
+                &admin(&outsider, HouseholdOperation::TransferOwnership),
+                home.id(),
+                version(3),
+                &outsider
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    // Transfer targets must be active members; stale versions conflict first.
+    assert_eq!(
+        households
+            .transfer_ownership(
+                &admin(&owner, HouseholdOperation::TransferOwnership),
+                home.id(),
+                version(3),
+                &outsider
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .transfer_ownership(
+                &admin(&owner, HouseholdOperation::TransferOwnership),
+                home.id(),
+                version(2),
+                &member
+            )
+            .await,
+        Err(HouseholdRepositoryError::Conflict)
+    );
+
+    let transferred = households
+        .transfer_ownership(
+            &admin(&owner, HouseholdOperation::TransferOwnership),
+            home.id(),
+            version(3),
+            &member,
+        )
+        .await
+        .unwrap();
+    assert_eq!(transferred.owner_id(), &member);
+    assert_eq!(transferred.version(), version(4));
+    // List administration follows household ownership immediately.
+    assert_eq!(
+        lists
+            .rename_list(
+                &renamer(&owner),
+                shared.id(),
+                version(1),
+                ListName::try_new("Alt").unwrap()
+            )
+            .await,
+        Err(RepositoryError::Forbidden)
+    );
+    assert_eq!(
+        lists
+            .rename_list(
+                &renamer(&member),
+                shared.id(),
+                version(1),
+                ListName::try_new("Neu").unwrap()
+            )
+            .await
+            .unwrap()
+            .version(),
+        2
+    );
+    assert_eq!(
+        households
+            .rename_household(
+                &admin(&owner, HouseholdOperation::Rename),
+                home.id(),
+                version(4),
+                HouseholdName::try_new("X").unwrap()
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+
+    // The former owner is now a member and may leave; access ends with the same write.
+    let after_leave = households.leave_household(&owner, home.id()).await.unwrap();
+    assert_eq!(after_leave.version(), version(5));
+    assert!(lists.list_accessible(&owner).await.unwrap().is_empty());
+    assert_eq!(
+        items.list_items(&reader(&owner), shared.id()).await,
+        Err(RepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .get_household(&admin(&owner, HouseholdOperation::View), home.id())
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households.leave_household(&owner, home.id()).await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+
+    // The new owner removes a member; removing a non-member is NotFound.
+    assert_eq!(
+        households
+            .remove_member(
+                &admin(&member, HouseholdOperation::RemoveMember),
+                home.id(),
+                version(4),
+                &second
+            )
+            .await,
+        Err(HouseholdRepositoryError::Conflict)
+    );
+    let after_removal = households
+        .remove_member(
+            &admin(&member, HouseholdOperation::RemoveMember),
+            home.id(),
+            version(5),
+            &second,
+        )
+        .await
+        .unwrap();
+    assert_eq!(after_removal.version(), version(6));
+    assert!(lists.list_accessible(&second).await.unwrap().is_empty());
+    assert_eq!(
+        households
+            .remove_member(
+                &admin(&member, HouseholdOperation::RemoveMember),
+                home.id(),
+                version(6),
+                &second
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+
+    // Deletion: members are Forbidden, stale versions conflict, outsiders get NotFound.
+    let full = provision_household(
+        households,
+        "life-full",
+        "life-member",
+        &["life-second", "life-third"],
+    )
+    .await;
+    assert_eq!(
+        households
+            .delete_household(
+                &admin(&second, HouseholdOperation::Delete),
+                full.id(),
+                full.version()
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    assert_eq!(
+        households
+            .delete_household(
+                &admin(&outsider, HouseholdOperation::Delete),
+                full.id(),
+                full.version()
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .delete_household(
+                &admin(&member, HouseholdOperation::Delete),
+                full.id(),
+                version(1)
+            )
+            .await,
+        Err(HouseholdRepositoryError::Conflict)
+    );
+
+    // Fill the household to its list limit, with items, plus a pending invitation, then
+    // delete it: everything becomes inaccessible at once and the limit slots are freed.
+    let mut full_lists = Vec::new();
+    for index in 0..Household::MAX_LISTS {
+        let list = household_list(&format!("life-full-{index}"), "life-full", "Liste");
+        households
+            .create_household_list(
+                &admin(&second, HouseholdOperation::CreateList),
+                list.clone(),
+            )
+            .await
+            .unwrap();
+        items
+            .add_item(
+                &editor(&second),
+                list.id(),
+                version(1),
+                item(&format!("life-full-item-{index}"), "life-second", 0),
+            )
+            .await
+            .unwrap();
+        full_lists.push(list);
+    }
+    households
+        .create_invitation(
+            &admin(&member, HouseholdOperation::ManageInvitations),
+            invitation(
+                "life-pending",
+                "life-full",
+                "life-member",
+                "life-pending",
+                5,
+            ),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    households
+        .delete_household(
+            &admin(&member, HouseholdOperation::Delete),
+            full.id(),
+            full.version(),
+        )
+        .await
+        .unwrap();
+
+    for principal in [&member, &second, &user("life-third")] {
+        let remaining = lists.list_accessible(principal).await.unwrap();
+        assert!(
+            remaining
+                .iter()
+                .all(|list| list.household_id() != Some(full.id())),
+            "deleted household lists must disappear"
+        );
+        assert!(
+            households
+                .list_households(principal)
+                .await
+                .unwrap()
+                .iter()
+                .all(|summary| summary.household.id() != full.id())
+        );
+    }
+    for list in &full_lists {
+        assert_eq!(
+            items.list_items(&reader(&second), list.id()).await,
+            Err(RepositoryError::NotFound)
+        );
+        assert_eq!(
+            lists
+                .delete_list(&deleter(&member), list.id(), version(2))
+                .await,
+            Err(RepositoryError::NotFound)
+        );
+    }
+    assert_eq!(
+        households
+            .get_household(&admin(&member, HouseholdOperation::View), full.id())
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .accept_invitation(&outsider, &token_hash("life-pending"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::InvitationUnavailable)
+    );
+    assert_eq!(
+        households
+            .delete_household(
+                &admin(&member, HouseholdOperation::Delete),
+                full.id(),
+                full.version()
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    // The id can be reused and the members' household slots were released.
+    households
+        .create_household(household("life-full", "life-third", "Neu"))
+        .await
+        .unwrap();
+    assert!(
+        lists
+            .list_accessible(&user("life-third"))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Runs invitation scenarios (roadmap C4): owner-only management, the valid-invitation
+/// limit, expiry/revocation/use-count enforcement, authenticated acceptance and membership
+/// limits. Contracts handle only token hashes, never raw tokens.
+pub async fn run_invitation_contract(
+    lists: &impl ShoppingListRepository,
+    households: &impl HouseholdStore,
+) {
+    let owner = user("inv-owner");
+    let member = user("inv-member");
+    let outsider = user("inv-outsider");
+    let home = provision_household(households, "inv-1", "inv-owner", &["inv-member"]).await;
+    let manage = |principal: &UserId| admin(principal, HouseholdOperation::ManageInvitations);
+    let shared = household_list("inv-list", "inv-1", "Gemeinsam");
+    households
+        .create_household_list(
+            &admin(&owner, HouseholdOperation::CreateList),
+            shared.clone(),
+        )
+        .await
+        .unwrap();
+
+    // Only the owner manages invitations; the creator must be the verified principal.
+    assert_eq!(
+        households
+            .create_invitation(
+                &manage(&member),
+                invitation("inv-m", "inv-1", "inv-member", "inv-m", 1),
+                at(NOW)
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    assert_eq!(
+        households
+            .create_invitation(
+                &manage(&outsider),
+                invitation("inv-o", "inv-1", "inv-outsider", "inv-o", 1),
+                at(NOW)
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+    assert_eq!(
+        households
+            .create_invitation(
+                &manage(&owner),
+                invitation("inv-spoof", "inv-1", "inv-member", "inv-spoof", 1),
+                at(NOW)
+            )
+            .await,
+        Err(HouseholdRepositoryError::InvalidRequest)
+    );
+    assert_eq!(
+        households
+            .list_invitations(&manage(&member), home.id())
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+
+    // Two uses: two different users join, the third attempt finds it used up.
+    households
+        .create_invitation(
+            &manage(&owner),
+            invitation("inv-a", "inv-1", "inv-owner", "inv-a", 2),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .create_invitation(
+                &manage(&owner),
+                invitation("inv-a", "inv-1", "inv-owner", "inv-a-2", 2),
+                at(NOW)
+            )
+            .await,
+        Err(HouseholdRepositoryError::AlreadyExists)
+    );
+    // Existing members are refused without consuming a use.
+    assert_eq!(
+        households
+            .accept_invitation(&member, &token_hash("inv-a"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::AlreadyMember)
+    );
+    let joined = households
+        .accept_invitation(&user("inv-joiner-1"), &token_hash("inv-a"), at(NOW))
+        .await
+        .unwrap();
+    assert_eq!(joined.role, einkaufio_domain::HouseholdRole::Member);
+    assert_eq!(
+        joined.household.version(),
+        home.version().checked_next().unwrap()
+    );
+    // Acceptance grants access to household lists immediately.
+    assert_eq!(
+        lists.list_accessible(&user("inv-joiner-1")).await.unwrap(),
+        vec![shared.clone()]
+    );
+    households
+        .accept_invitation(&user("inv-joiner-2"), &token_hash("inv-a"), at(NOW))
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .accept_invitation(&user("inv-joiner-3"), &token_hash("inv-a"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::InvitationUnavailable)
+    );
+    let stored = households
+        .list_invitations(&manage(&owner), home.id())
+        .await
+        .unwrap();
+    let used = stored
+        .iter()
+        .find(|candidate| candidate.id().as_str() == "inv-a")
+        .unwrap();
+    assert_eq!(used.used_count(), 2);
+    assert_eq!(used.token_hash(), &token_hash("inv-a"));
+
+    // Unknown, expired and revoked tokens are indistinguishable.
+    households
+        .create_invitation(
+            &manage(&owner),
+            invitation("inv-b", "inv-1", "inv-owner", "inv-b", 5),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    for (seed, now) in [
+        ("inv-unknown", NOW),
+        ("inv-b", EXPIRES),
+        ("inv-b", EXPIRES + 1),
+    ] {
+        assert_eq!(
+            households
+                .accept_invitation(&outsider, &token_hash(seed), at(now))
+                .await,
+            Err(HouseholdRepositoryError::InvitationUnavailable)
+        );
+    }
+    assert_eq!(
+        households
+            .revoke_invitation(
+                &manage(&member),
+                home.id(),
+                &InvitationId::try_new("inv-b").unwrap()
+            )
+            .await,
+        Err(HouseholdRepositoryError::Forbidden)
+    );
+    let revoked = households
+        .revoke_invitation(
+            &manage(&owner),
+            home.id(),
+            &InvitationId::try_new("inv-b").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(revoked.is_revoked());
+    assert_eq!(
+        households
+            .accept_invitation(&outsider, &token_hash("inv-b"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::InvitationUnavailable)
+    );
+    assert!(lists.list_accessible(&outsider).await.unwrap().is_empty());
+
+    // Invitations of another household cannot be revoked through this one.
+    provision_household(households, "inv-2", "inv-outsider", &[]).await;
+    households
+        .create_invitation(
+            &admin(&outsider, HouseholdOperation::ManageInvitations),
+            invitation("inv-foreign", "inv-2", "inv-outsider", "inv-foreign", 1),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .revoke_invitation(
+                &manage(&owner),
+                home.id(),
+                &InvitationId::try_new("inv-foreign").unwrap()
+            )
+            .await,
+        Err(HouseholdRepositoryError::NotFound)
+    );
+
+    // At most five simultaneously valid invitations; used-up, revoked and expired ones do
+    // not count. inv-a (used up) and inv-b (revoked) are not valid.
+    for index in 0..Invitation::MAX_VALID_PER_HOUSEHOLD {
+        households
+            .create_invitation(
+                &manage(&owner),
+                invitation(
+                    &format!("inv-c{index}"),
+                    "inv-1",
+                    "inv-owner",
+                    &format!("inv-c{index}"),
+                    1,
+                ),
+                at(NOW),
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        households
+            .create_invitation(
+                &manage(&owner),
+                invitation("inv-over", "inv-1", "inv-owner", "inv-over", 1),
+                at(NOW)
+            )
+            .await,
+        Err(HouseholdRepositoryError::InvitationLimitReached)
+    );
+    households
+        .create_invitation(
+            &manage(&owner),
+            invitation("inv-later", "inv-1", "inv-owner", "inv-later", 1),
+            at(EXPIRES),
+        )
+        .await
+        .expect("expired invitations no longer count");
+
+    // Member limit (10 including the owner): the household has owner, member, two joiners.
+    let mut joined_count = 4;
+    for index in 0..Invitation::MAX_VALID_PER_HOUSEHOLD {
+        households
+            .accept_invitation(
+                &user(&format!("inv-fill-{index}")),
+                &token_hash(&format!("inv-c{index}")),
+                at(NOW),
+            )
+            .await
+            .unwrap();
+        joined_count += 1;
+    }
+    assert_eq!(joined_count, 9);
+    households
+        .revoke_invitation(
+            &manage(&owner),
+            home.id(),
+            &InvitationId::try_new("inv-later").unwrap(),
+        )
+        .await
+        .unwrap();
+    households
+        .create_invitation(
+            &manage(&owner),
+            invitation("inv-last", "inv-1", "inv-owner", "inv-last", 3),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    households
+        .accept_invitation(&user("inv-tenth"), &token_hash("inv-last"), at(NOW))
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .accept_invitation(&user("inv-eleventh"), &token_hash("inv-last"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::MemberLimitReached)
+    );
+    assert_eq!(
+        households
+            .get_household(&admin(&owner, HouseholdOperation::View), home.id())
+            .await
+            .unwrap()
+            .members
+            .len(),
+        Household::MAX_MEMBERS
+    );
+
+    // Per-user household limit applies to acceptance too.
+    let busy = user("inv-busy");
+    for index in 0..Household::MAX_HOUSEHOLDS_PER_USER {
+        households
+            .create_household(household(&format!("inv-busy-{index}"), "inv-busy", "Voll"))
+            .await
+            .unwrap();
+    }
+    households
+        .create_invitation(
+            &admin(&outsider, HouseholdOperation::ManageInvitations),
+            invitation("inv-busy", "inv-2", "inv-outsider", "inv-busy", 1),
+            at(NOW),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        households
+            .accept_invitation(&busy, &token_hash("inv-busy"), at(NOW))
+            .await,
+        Err(HouseholdRepositoryError::HouseholdLimitReached)
+    );
+    // The refused acceptance did not consume the use.
+    households
+        .accept_invitation(&user("inv-free"), &token_hash("inv-busy"), at(NOW))
+        .await
+        .unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1380,6 +2437,103 @@ mod tests {
         let repository = InMemoryRepository::new();
         run_shared_access_contract(&repository, &repository, &repository).await;
     }
+
+    #[tokio::test]
+    async fn in_memory_adapter_passes_household_contract() {
+        let repository = InMemoryRepository::new();
+        run_household_contract(&repository, &repository, &repository).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_adapter_passes_membership_lifecycle_contract() {
+        let repository = InMemoryRepository::new();
+        run_membership_lifecycle_contract(&repository, &repository, &repository).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_adapter_passes_invitation_contract() {
+        let repository = InMemoryRepository::new();
+        run_invitation_contract(&repository, &repository).await;
+    }
+
+    #[tokio::test]
+    async fn default_household_and_invitation_operations_are_fail_closed() {
+        let owner = user("owner");
+        let id = household_id("household");
+        let access = household_access(&owner, HouseholdOperation::View);
+        let unavailable = Err::<(), _>(HouseholdRepositoryError::Unavailable);
+        assert_eq!(
+            Unimplemented
+                .create_household(household("household", "owner", "X"))
+                .await,
+            unavailable
+        );
+        assert!(Unimplemented.list_households(&owner).await.is_err());
+        assert!(Unimplemented.get_household(&access, &id).await.is_err());
+        assert!(
+            Unimplemented
+                .rename_household(
+                    &access,
+                    &id,
+                    version(1),
+                    HouseholdName::try_new("X").unwrap()
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            Unimplemented
+                .create_household_list(&access, household_list("l", "household", "X"))
+                .await,
+            unavailable
+        );
+        assert!(Unimplemented.leave_household(&owner, &id).await.is_err());
+        assert!(
+            Unimplemented
+                .remove_member(&access, &id, version(1), &owner)
+                .await
+                .is_err()
+        );
+        assert!(
+            Unimplemented
+                .transfer_ownership(&access, &id, version(1), &owner)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            Unimplemented
+                .delete_household(&access, &id, version(1))
+                .await,
+            unavailable
+        );
+        assert_eq!(
+            Unimplemented
+                .create_invitation(
+                    &access,
+                    invitation("i", "household", "owner", "i", 1),
+                    at(NOW)
+                )
+                .await,
+            unavailable
+        );
+        assert!(Unimplemented.list_invitations(&access, &id).await.is_err());
+        assert!(
+            Unimplemented
+                .revoke_invitation(&access, &id, &InvitationId::try_new("i").unwrap())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            Unimplemented
+                .accept_invitation(&owner, &token_hash("i"), at(NOW))
+                .await
+                .map(|_| ()),
+            unavailable
+        );
+    }
+
+    impl HouseholdRepository for Unimplemented {}
+    impl InvitationRepository for Unimplemented {}
 
     #[tokio::test]
     async fn in_memory_adapter_passes_reorder_contract() {

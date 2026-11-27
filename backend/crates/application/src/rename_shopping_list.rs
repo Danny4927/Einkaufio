@@ -103,7 +103,7 @@ mod tests {
             let mut stored = self.list.lock().unwrap();
             // Contract: authorize first, then check optimistic concurrency before the no-op
             // name comparison.
-            let held = stored.ownership_access(access.principal());
+            let held = stored.access_for(access.principal(), None);
             match held {
                 Some(held) if stored.id() == list_id => {
                     if !held.allows(access.permission()) {

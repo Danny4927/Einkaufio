@@ -84,7 +84,7 @@ mod tests {
             Ok(self
                 .lists
                 .iter()
-                .filter(|list| list.ownership_access(principal).is_some())
+                .filter(|list| list.access_for(principal, None).is_some())
                 .cloned()
                 .collect())
         }

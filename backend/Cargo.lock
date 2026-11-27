@@ -204,6 +204,7 @@ version = "0.1.0"
 dependencies = [
  "einkaufio-application",
  "einkaufio-domain",
+ "ring",
  "tokio",
 ]
 
@@ -213,6 +214,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "einkaufio-adapters",
  "einkaufio-application",
  "jsonwebtoken",
  "rand 0.8.8",

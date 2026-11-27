@@ -17,5 +17,7 @@
 | [013](013-walking-skeleton-and-vertical-delivery-phases.md) | Walking skeleton first and vertical delivery phases | Accepted |
 | [014](014-async-repository-ports.md) | Asynchronous repository ports | Accepted |
 | [015](015-list-access-model.md) | List access model (owner/household; explicit sharing in v1.x) | Accepted |
+| [016](016-per-principal-throttling.md) | Per-principal request throttling (best effort per Lambda instance) | Accepted |
+| [017](017-households-invitation-token-ports.md) | Households, membership lifecycle and invitation token ports | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.
