@@ -1,8 +1,8 @@
 ---
-name: ship
-description: Autonomous delivery workflow - plan, implement with tiered subagents (Haiku / Opus low / Opus high escalation), verify, review, apply feedback and open a pull request. Use when the user invokes /ship <task>.
+name: deliver
+description: Autonomous delivery workflow - plan, implement with tiered subagents (Haiku / Opus low / Opus high escalation), verify, review, apply feedback and open a pull request. Use when the user invokes /deliver <task>.
 ---
-# /ship – tiered autonomous delivery
+# /deliver – tiered autonomous delivery
 
 Input: the task description in the arguments. You are the orchestrator: delegate work to the subagents below, keep only summaries in your context, and decide on escalation. Never accept a subagent's claim of success without the real command output.
 
