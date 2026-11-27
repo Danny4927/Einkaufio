@@ -203,7 +203,7 @@ These are logical boundaries inside one deployable modular monolith, not a manda
 
 ## 8. Architecture decisions
 
-See [ADRs](decisions/README.md): serverless modular monolith, Cognito, DynamoDB single-table, polling, personal lists + households, platform-neutral API, S3/CloudFront hosting, secure invitation links, DDD/hexagonal architecture with replaceable persistence, and evidence-based delivery with visual regression tests.
+See [ADRs](decisions/README.md): serverless modular monolith, Cognito, DynamoDB single-table, polling, personal lists + households, platform-neutral API, S3/CloudFront hosting, secure invitation links, DDD/hexagonal architecture with replaceable persistence, evidence-based delivery with visual regression tests, monorepo/Terraform/enforced architecture, agent workflow and quality gates, and walking-skeleton-first vertical delivery phases.
 
 ## 9. Quality requirements
 
@@ -255,6 +255,9 @@ See [ADRs](decisions/README.md): serverless modular monolith, Cognito, DynamoDB 
 | Offline edits conflict | Start with cached reads; explicit pending write queue and conflict UX |
 | AWS pricing/free-tier changes | Budget alerts and recurring cost review |
 | Android requirements differ | Stable OpenAPI and shared backend domain rules |
+| Owner-only ports conflict with household/member access | Access-model ADR before household code (roadmap Phase C1); adapt ports and contract scenarios |
+| Unverified infrastructure assumptions (transactions, Cognito in PWA, Function URL/CORS) | Walking skeleton deployed to dev before further features (ADR 013, roadmap Phase A) |
+| Privacy non-compliance (GDPR) | Account deletion, data export and privacy notice as release items (roadmap Phase D2) |
 
 ## 11. Glossary
 
