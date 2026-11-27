@@ -53,16 +53,10 @@ impl ApiState {
     }
 }
 
-pub fn router(mut state: ApiState) -> Router {
-    // Runtime callers get Cognito verification from deployment configuration by default.
-    // If configuration is absent or invalid, keep the state unauthenticated and fail closed.
-    if state.verifier.is_none()
-        && let Ok(config) = crate::auth::CognitoConfig::from_env()
-        && let Ok(verifier) = CognitoTokenVerifier::new(config)
-    {
-        state.verifier = Some(Arc::new(verifier));
-    }
-
+/// Build the HTTP router. This function does not read the environment: the composition root
+/// must construct the state with [`ApiState::from_cognito_env`] and abort startup on error.
+/// A state without a verifier keeps protected routes fail-closed (503).
+pub fn router(state: ApiState) -> Router {
     let protected = protected_routes().route_layer(middleware::from_fn_with_state(
         state.clone(),
         require_verified_actor,
@@ -120,7 +114,8 @@ impl FromRequestParts<ApiState> for VerifiedActor {
             .extensions
             .get::<Self>()
             .cloned()
-            .ok_or(StatusCode::UNAUTHORIZED)
+            // Reaching a handler without the auth middleware is a wiring bug, not a client error.
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
@@ -491,5 +486,85 @@ mod tests {
                 "Bearer"
             );
         }
+    }
+
+    #[derive(Default)]
+    struct RecordingLists {
+        owners: Mutex<Vec<String>>,
+    }
+
+    impl ShoppingListRepository for RecordingLists {
+        fn create_personal(
+            &self,
+            list: ShoppingList,
+        ) -> Result<(), einkaufio_application::RepositoryError> {
+            self.owners
+                .lock()
+                .unwrap()
+                .push(list.owner_id().as_str().to_owned());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn verified_subject_reaches_the_use_case_as_owner() {
+        use crate::auth::jwks_integration_tests::{claims, fixture, signed_token};
+
+        let f = fixture().await;
+        let lists = Arc::new(RecordingLists::default());
+        let state =
+            ApiState::new(lists.clone(), Arc::new(TestIds)).with_authenticator(f.verifier.clone());
+        let token = signed_token(&f.private_pem, "key-1", claims(serde_json::json!({})));
+
+        for scheme in ["Bearer", "bearer"] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/lists")
+                        .header("content-type", "application/json")
+                        .header(
+                            axum::http::header::AUTHORIZATION,
+                            format!("{scheme} {token}"),
+                        )
+                        .body(Body::from(r#"{"name":"Groceries"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+        assert_eq!(
+            *lists.owners.lock().unwrap(),
+            vec!["user-123".to_owned(), "user-123".to_owned()]
+        );
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn bearer_token_with_extra_whitespace_is_rejected() {
+        let f = crate::auth::jwks_integration_tests::fixture().await;
+        let token = crate::auth::jwks_integration_tests::signed_token(
+            &f.private_pem,
+            "key-1",
+            crate::auth::jwks_integration_tests::claims(serde_json::json!({})),
+        );
+        let state = ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds))
+            .with_authenticator(f.verifier.clone());
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/lists")
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer  {token}"),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        f.server.abort();
     }
 }

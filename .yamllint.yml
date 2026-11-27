@@ -1,0 +1,12 @@
+extends: default
+ignore: |
+  apps/web/node_modules/
+rules:
+  line-length: disable
+  document-start: disable
+  comments: disable
+  braces: disable
+  brackets: disable
+  truthy:
+    check-keys: false
+  key-duplicates: enable

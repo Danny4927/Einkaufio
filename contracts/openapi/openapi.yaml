@@ -101,7 +101,6 @@ paths:
               schema: { $ref: '#/components/schemas/ShoppingListSummary' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/lists/{listId}:
     parameters:
       - $ref: '#/components/parameters/ListId'
@@ -365,7 +364,7 @@ paths:
               additionalProperties: false
       responses:
         '200': { description: Accepted or already a member }
-        '410': { description: Expired, revoked or exhausted invitation }
+        '410': { description: 'Expired, revoked or exhausted invitation' }
   /api/invites/{inviteId}:
     parameters:
       - name: inviteId

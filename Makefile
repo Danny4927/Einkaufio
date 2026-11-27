@@ -3,10 +3,10 @@ WEB_DIR := apps/web
 TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -exec dirname {} \; | sort -u)
 PLAYWRIGHT_INSTALL ?= npx playwright install chromium
 
-.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate web-install web-build web-e2e web-e2e-setup agent-config-check
+.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate web-install web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
 
-check: fmt lint test-workspace architecture terraform-fmt
-verify: ci-backend ci-web ci-terraform agent-config-check
+check: fmt lint test-workspace architecture terraform-fmt yaml-lint
+verify: ci-backend ci-web ci-terraform ci-contracts agent-config-check
 ci-backend: fmt lint test-workspace architecture
 ci-web: web-install
 	cd $(WEB_DIR) && npm run build
@@ -43,5 +43,11 @@ terraform-validate:
 		terraform -chdir="$$dir" init -backend=false -input=false; \
 		terraform -chdir="$$dir" validate; \
 	done
+REDOCLY_CLI ?= @redocly/cli@1.34.5
+ci-contracts: yaml-lint openapi-lint
+yaml-lint:
+	yamllint --strict .
+openapi-lint:
+	npx --yes $(REDOCLY_CLI) lint --config contracts/openapi/redocly.yaml contracts/openapi/openapi.yaml
 agent-config-check:
 	bash scripts/test_agent_guardrails.sh
