@@ -1,10 +1,8 @@
 //! HTTP transport for personal shopping lists.
-//!
-//! Authentication is intentionally fail-closed until Cognito JWT verification is provided.
-//! No caller-controlled identity is accepted by these handlers.
 
 use std::sync::Arc;
 
+use crate::auth::{AuthError, CognitoTokenVerifier};
 use axum::{
     Json, Router,
     extract::{FromRequestParts, State},
@@ -24,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub struct ApiState {
     lists: Arc<dyn ShoppingListRepository + Send + Sync>,
     ids: Arc<dyn ListIdGenerator + Send + Sync>,
+    verifier: Option<Arc<CognitoTokenVerifier>>,
 }
 
 impl ApiState {
@@ -31,15 +30,38 @@ impl ApiState {
         lists: Arc<dyn ShoppingListRepository + Send + Sync>,
         ids: Arc<dyn ListIdGenerator + Send + Sync>,
     ) -> Self {
-        Self { lists, ids }
+        Self {
+            lists,
+            ids,
+            verifier: None,
+        }
+    }
+
+    pub fn with_authenticator(mut self, verifier: CognitoTokenVerifier) -> Self {
+        self.verifier = Some(Arc::new(verifier));
+        self
+    }
+
+    /// Build an authenticated API state from trusted runtime environment variables.
+    pub fn from_cognito_env(
+        lists: Arc<dyn ShoppingListRepository + Send + Sync>,
+        ids: Arc<dyn ListIdGenerator + Send + Sync>,
+    ) -> Result<Self, AuthError> {
+        let config = crate::auth::CognitoConfig::from_env()?;
+        let verifier = CognitoTokenVerifier::new(config)?;
+        Ok(Self::new(lists, ids).with_authenticator(verifier))
     }
 }
 
+/// Build the HTTP router. This function does not read the environment: the composition root
+/// must construct the state with [`ApiState::from_cognito_env`] and abort startup on error.
+/// A state without a verifier keeps protected routes fail-closed (503).
 pub fn router(state: ApiState) -> Router {
-    build_router(
-        state,
-        protected_routes().route_layer(middleware::from_fn(require_verified_actor)),
-    )
+    let protected = protected_routes().route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        require_verified_actor,
+    ));
+    build_router(state, protected)
 }
 
 fn protected_routes() -> Router<ApiState> {
@@ -65,15 +87,13 @@ struct HealthResponse {
     status: &'static str,
 }
 
-/// Identity that can only be created inside the API crate after authentication verification.
+/// Constructible only inside this crate from a cryptographically verified Cognito subject.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct VerifiedActor {
     owner_id: String,
 }
 
 impl VerifiedActor {
-    /// The only production constructor is crate-private so transport callers cannot forge identity.
-    #[allow(dead_code)] // Wired by the Cognito verifier in the authentication milestone.
     pub(crate) fn from_verified_claims(owner_id: String) -> Self {
         Self { owner_id }
     }
@@ -94,15 +114,46 @@ impl FromRequestParts<ApiState> for VerifiedActor {
             .extensions
             .get::<Self>()
             .cloned()
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)
+            // Reaching a handler without the auth middleware is a wiring bug, not a client error.
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
-async fn require_verified_actor(_request: axum::extract::Request, _next: Next) -> Response {
-    // This placeholder is intentionally not configurable to accept an arbitrary user ID.
-    // Replace it only together with cryptographic Cognito token verification and a verified
-    // principal extractor.
-    ApiError::AuthenticationUnavailable.into_response()
+async fn require_verified_actor(
+    State(state): State<ApiState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let Some(verifier) = state.verifier else {
+        return ApiError::AuthenticationUnavailable.into_response();
+    };
+
+    let token = match request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|value| {
+            value
+                .get(..7)
+                .filter(|scheme| scheme.eq_ignore_ascii_case("Bearer "))
+                .map(|_| &value[7..])
+        })
+        .filter(|value| !value.is_empty())
+    {
+        Some(token) => token,
+        None => return ApiError::Unauthorized.into_response(),
+    };
+
+    match verifier.verify(token).await {
+        Ok(principal) => {
+            request
+                .extensions_mut()
+                .insert(VerifiedActor::from_verified_claims(principal.subject));
+            next.run(request).await
+        }
+        Err(AuthError::InvalidToken) => ApiError::Unauthorized.into_response(),
+        Err(AuthError::Unavailable) => ApiError::AuthenticationUnavailable.into_response(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -145,6 +196,7 @@ async fn list_personal_lists(
             owner_id: actor.owner_id().to_owned(),
         })
         .map_err(ApiError::from)?;
+
     Ok(Json(ListPageResponse {
         items: lists.iter().map(ListResponse::from).collect(),
     }))
@@ -162,6 +214,7 @@ async fn create_personal_list(
             name: payload.name,
         })
         .map_err(ApiError::from)?;
+
     Ok((StatusCode::CREATED, Json(ListResponse::from(&list))))
 }
 
@@ -188,6 +241,7 @@ impl ErrorResponse {
 #[derive(Debug)]
 enum ApiError {
     AuthenticationUnavailable,
+    Unauthorized,
     InvalidInput,
     Unavailable,
     Internal,
@@ -197,8 +251,6 @@ impl From<CreatePersonalListError> for ApiError {
     fn from(error: CreatePersonalListError) -> Self {
         match error {
             CreatePersonalListError::InvalidName(_) => Self::InvalidInput,
-            // Owner identity and generated list IDs are server-controlled. Failures here
-            // indicate an authentication/infrastructure invariant, not a client conflict.
             CreatePersonalListError::InvalidOwner(_) | CreatePersonalListError::AlreadyExists => {
                 Self::Internal
             }
@@ -212,16 +264,22 @@ impl From<CreatePersonalListError> for ApiError {
 impl From<ListPersonalListsError> for ApiError {
     fn from(error: ListPersonalListsError) -> Self {
         match error {
-            ListPersonalListsError::InvalidOwner(_) => Self::Internal,
+            ListPersonalListsError::InvalidOwner(_)
+            | ListPersonalListsError::RepositoryInvariantViolation => Self::Internal,
             ListPersonalListsError::PersistenceUnavailable => Self::Unavailable,
-            ListPersonalListsError::RepositoryInvariantViolation => Self::Internal,
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let unauthorized = matches!(self, Self::Unauthorized);
         let (status, code, message) = match self {
+            Self::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "A valid Cognito access token is required",
+            ),
             Self::AuthenticationUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "authentication_unavailable",
@@ -243,7 +301,14 @@ impl IntoResponse for ApiError {
                 "An internal error occurred",
             ),
         };
-        (status, Json(ErrorResponse::new(code, message))).into_response()
+        let mut response = (status, Json(ErrorResponse::new(code, message))).into_response();
+        if unauthorized {
+            response.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer"),
+            );
+        }
+        response
     }
 }
 
@@ -330,17 +395,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn personal_list_routes_fail_closed_without_verified_authentication() {
+    async fn protected_routes_fail_closed_without_authentication_configuration() {
         let app = router(ApiState::new(
             Arc::new(TestLists::default()),
             Arc::new(TestIds),
         ));
-        for (method, uri, body) in [
-            (Method::GET, "/api/lists", Body::empty()),
+        for (method, body) in [
+            (Method::GET, Body::empty()),
             (
                 Method::POST,
-                "/api/lists",
-                Body::from(r#"{"name":"Einkauf","ownerId":"attacker"}"#),
+                Body::from(r#"{"name":"Groceries","ownerId":"attacker"}"#),
             ),
         ] {
             let response = app
@@ -348,7 +412,7 @@ mod tests {
                 .oneshot(
                     Request::builder()
                         .method(method)
-                        .uri(uri)
+                        .uri("/api/lists")
                         .header("content-type", "application/json")
                         .body(body)
                         .unwrap(),
@@ -363,29 +427,144 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_list_returns_created_for_verified_actor() {
-        let response = send_json(test_router(), Method::POST, r#"{"name":"Wocheneinkauf"}"#).await;
+    async fn create_list_uses_verified_test_actor() {
+        let response = send_json(test_router(), Method::POST, r#"{"name":"Groceries"}"#).await;
         assert_eq!(response.status(), StatusCode::CREATED);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["id"], "test-list-id");
-        assert_eq!(value["name"], "Wocheneinkauf");
+        assert_eq!(value["name"], "Groceries");
     }
 
     #[tokio::test]
-    async fn create_list_returns_bad_request_for_blank_name() {
+    async fn blank_list_name_is_rejected() {
         let response = send_json(test_router(), Method::POST, r#"{"name":"   "}"#).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
-    async fn create_list_returns_unprocessable_entity_for_unknown_fields() {
+    async fn client_cannot_supply_owner_id() {
         let response = send_json(
             test_router(),
             Method::POST,
-            r#"{"name":"Wocheneinkauf","ownerId":"attacker"}"#,
+            r#"{"name":"Groceries","ownerId":"attacker"}"#,
         )
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn authentication_middleware_rejects_missing_and_malformed_bearer_tokens() {
+        let verifier = CognitoTokenVerifier::new_with_jwks_url(
+            crate::auth::CognitoConfig {
+                issuer: "https://issuer.example.test/pool".to_owned(),
+                app_client_id: "client".to_owned(),
+            },
+            "http://127.0.0.1:1/.well-known/jwks.json".to_owned(),
+        )
+        .unwrap();
+        let state = ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds))
+            .with_authenticator(verifier);
+        let app = router(state);
+
+        for authorization in [None, Some("Bearer not-a-jwt")] {
+            let mut builder = Request::builder().uri("/api/lists");
+            if let Some(value) = authorization {
+                builder = builder.header(axum::http::header::AUTHORIZATION, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(builder.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(axum::http::header::WWW_AUTHENTICATE)
+                    .unwrap(),
+                "Bearer"
+            );
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingLists {
+        owners: Mutex<Vec<String>>,
+    }
+
+    impl ShoppingListRepository for RecordingLists {
+        fn create_personal(
+            &self,
+            list: ShoppingList,
+        ) -> Result<(), einkaufio_application::RepositoryError> {
+            self.owners
+                .lock()
+                .unwrap()
+                .push(list.owner_id().as_str().to_owned());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn verified_subject_reaches_the_use_case_as_owner() {
+        use crate::auth::jwks_integration_tests::{claims, fixture, signed_token};
+
+        let f = fixture().await;
+        let lists = Arc::new(RecordingLists::default());
+        let state =
+            ApiState::new(lists.clone(), Arc::new(TestIds)).with_authenticator(f.verifier.clone());
+        let token = signed_token(&f.private_pem, "key-1", claims(serde_json::json!({})));
+
+        for scheme in ["Bearer", "bearer"] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/lists")
+                        .header("content-type", "application/json")
+                        .header(
+                            axum::http::header::AUTHORIZATION,
+                            format!("{scheme} {token}"),
+                        )
+                        .body(Body::from(r#"{"name":"Groceries"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+        assert_eq!(
+            *lists.owners.lock().unwrap(),
+            vec!["user-123".to_owned(), "user-123".to_owned()]
+        );
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn bearer_token_with_extra_whitespace_is_rejected() {
+        let f = crate::auth::jwks_integration_tests::fixture().await;
+        let token = crate::auth::jwks_integration_tests::signed_token(
+            &f.private_pem,
+            "key-1",
+            crate::auth::jwks_integration_tests::claims(serde_json::json!({})),
+        );
+        let state = ApiState::new(Arc::new(TestLists::default()), Arc::new(TestIds))
+            .with_authenticator(f.verifier.clone());
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/lists")
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer  {token}"),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        f.server.abort();
     }
 }

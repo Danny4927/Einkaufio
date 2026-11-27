@@ -78,6 +78,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ListPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
     post:
       tags: [Lists]
       summary: Create a personal list
@@ -97,6 +99,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ShoppingListSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/AuthenticationUnavailable' }
   /api/lists/{listId}:
     parameters:
       - $ref: '#/components/parameters/ListId'
@@ -360,7 +364,7 @@ paths:
               additionalProperties: false
       responses:
         '200': { description: Accepted or already a member }
-        '410': { description: Expired, revoked or exhausted invitation }
+        '410': { description: 'Expired, revoked or exhausted invitation' }
   /api/invites/{inviteId}:
     parameters:
       - name: inviteId
@@ -549,6 +553,14 @@ components:
   responses:
     Unauthorized:
       description: Missing or invalid authentication
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthenticationUnavailable:
+      description: Authentication configuration or Cognito JWKS service is unavailable
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
