@@ -6,8 +6,11 @@
 pub mod create_personal_list;
 pub mod delete_shopping_list;
 pub mod list_accessible_lists;
+pub mod list_queries;
 pub mod ports;
+pub mod profiles;
 pub mod rename_shopping_list;
+pub mod reorder_shopping_items;
 pub mod shopping_items;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -21,13 +24,19 @@ pub use delete_shopping_list::{
 pub use list_accessible_lists::{
     ListAccessibleLists, ListAccessibleListsError, ListAccessibleListsQuery,
 };
+pub use list_queries::{
+    ListQueryError, PageAccessibleLists, PageParameters, PageShoppingItems, SyncShoppingList,
+};
 pub use ports::{
-    ItemIdGenerator, ListAccessRequest, ListIdGenerator, RepositoryError, ShoppingItemRepository,
+    ItemIdGenerator, ListAccessRequest, ListIdGenerator, ListSync, Page, PageCursor, PageRequest,
+    PageSize, PageSizeError, ProfileRepository, RepositoryError, ShoppingItemRepository,
     ShoppingListRepository,
 };
+pub use profiles::{CreateProfile, GetProfile, ProfileError, UpdateProfile};
 pub use rename_shopping_list::{
     RenameShoppingList, RenameShoppingListCommand, RenameShoppingListError,
 };
+pub use reorder_shopping_items::{ReorderShoppingItems, ReorderShoppingItemsCommand};
 pub use shopping_items::{
     AddShoppingItem, AddShoppingItemCommand, DeleteShoppingItem, DeleteShoppingItemCommand,
     SetShoppingItemChecked, SetShoppingItemCheckedCommand, ShoppingItemError, UpdateShoppingItem,

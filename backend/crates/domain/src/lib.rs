@@ -5,14 +5,16 @@
 
 pub mod access;
 pub mod identifiers;
+pub mod profile;
 pub mod shopping_item;
 pub mod shopping_list;
 
 pub use access::{ListAccess, ListOperation, ListPermission};
 pub use identifiers::{IdentifierError, ItemId, ListId, UserId};
+pub use profile::{DisplayName, DisplayNameError, UserProfile};
 pub use shopping_item::{
-    ItemDetails, ItemMutationError, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError,
-    ShoppingItem,
+    ItemDetails, ItemMutationError, ItemName, ItemNote, ItemOrder, ItemOrderError, ItemQuantity,
+    ItemUnit, ItemValueError, ShoppingItem,
 };
 pub use shopping_list::{
     AggregateVersion, AggregateVersionError, ListMutationError, ListName, ListNameError,

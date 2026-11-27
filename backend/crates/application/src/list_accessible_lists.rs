@@ -43,7 +43,8 @@ impl<'a, R: ShoppingListRepository> ListAccessibleLists<'a, R> {
                 | RepositoryError::Forbidden
                 | RepositoryError::Conflict
                 | RepositoryError::ItemLimitReached
-                | RepositoryError::VersionExhausted => {
+                | RepositoryError::VersionExhausted
+                | RepositoryError::InvalidCursor => {
                     ListAccessibleListsError::RepositoryInvariantViolation
                 }
             })

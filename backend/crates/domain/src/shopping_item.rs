@@ -166,6 +166,17 @@ impl ShoppingItem {
             .ok_or(ItemMutationError::VersionExhausted)
     }
 
+    /// Moves the item to a repository-assigned position, advancing its version only when the
+    /// position changes. On version exhaustion the item is left unchanged.
+    pub fn move_to(&mut self, position: u32) -> Result<bool, ItemMutationError> {
+        if self.position == position {
+            return Ok(false);
+        }
+        self.version = self.next_version()?;
+        self.position = position;
+        Ok(true)
+    }
+
     /// Returns the current editable attributes.
     pub fn details(&self) -> ItemDetails {
         ItemDetails {
@@ -189,6 +200,49 @@ impl ShoppingItem {
         self.unit = details.unit;
         self.note = details.note;
         Ok(true)
+    }
+}
+
+/// Errors of a requested item order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ItemOrderError {
+    DuplicateItem,
+    TooManyItems,
+}
+
+/// A requested complete order of a list's items: unique ids, at most
+/// [`ItemOrder::MAX_ITEMS`] entries. Index `n` becomes position `n`.
+///
+/// Whether the order names exactly the list's current items can only be decided atomically
+/// by the repository.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ItemOrder(Vec<ItemId>);
+
+impl ItemOrder {
+    /// Equal to the active-item limit of a list.
+    pub const MAX_ITEMS: usize = 100;
+
+    pub fn try_new(item_ids: Vec<ItemId>) -> Result<Self, ItemOrderError> {
+        if item_ids.len() > Self::MAX_ITEMS {
+            return Err(ItemOrderError::TooManyItems);
+        }
+        let mut seen = std::collections::HashSet::with_capacity(item_ids.len());
+        if !item_ids.iter().all(|id| seen.insert(id)) {
+            return Err(ItemOrderError::DuplicateItem);
+        }
+        Ok(Self(item_ids))
+    }
+
+    pub fn item_ids(&self) -> &[ItemId] {
+        &self.0
+    }
+
+    /// The position assigned to `item_id`, if the order contains it.
+    pub fn position_of(&self, item_id: &ItemId) -> Option<u32> {
+        self.0
+            .iter()
+            .position(|candidate| candidate == item_id)
+            .and_then(|index| u32::try_from(index).ok())
     }
 }
 
@@ -262,6 +316,41 @@ mod tests {
         assert_eq!(item.position(), 0);
         assert_eq!(item.update_details(details), Ok(false));
         assert_eq!(item.version(), 3);
+    }
+
+    #[test]
+    fn moving_changes_position_and_increments_once() {
+        let mut item = item();
+        assert_eq!(item.move_to(3), Ok(true));
+        assert_eq!(item.position(), 3);
+        assert_eq!(item.version(), 2);
+        assert_eq!(item.move_to(3), Ok(false));
+        assert_eq!(item.version(), 2);
+        item.version = u64::MAX;
+        assert_eq!(item.move_to(1), Err(ItemMutationError::VersionExhausted));
+        assert_eq!(item.position(), 3);
+    }
+
+    #[test]
+    fn item_order_rejects_duplicates_and_oversize_orders() {
+        let id = |value: &str| ItemId::try_new(value).unwrap();
+        let order = ItemOrder::try_new(vec![id("b"), id("a")]).unwrap();
+        assert_eq!(order.position_of(&id("a")), Some(1));
+        assert_eq!(order.position_of(&id("c")), None);
+        assert_eq!(
+            ItemOrder::try_new(vec![id("a"), id("b"), id("a")]),
+            Err(ItemOrderError::DuplicateItem)
+        );
+        let many = (0..=ItemOrder::MAX_ITEMS)
+            .map(|index| id(&format!("item-{index}")))
+            .collect();
+        assert_eq!(ItemOrder::try_new(many), Err(ItemOrderError::TooManyItems));
+        assert!(
+            ItemOrder::try_new(Vec::new())
+                .unwrap()
+                .item_ids()
+                .is_empty()
+        );
     }
 
     #[test]

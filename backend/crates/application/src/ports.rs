@@ -15,8 +15,8 @@
 use std::future::Future;
 
 use einkaufio_domain::{
-    AggregateVersion, ItemDetails, ItemId, ListId, ListName, ListOperation, ListPermission,
-    ShoppingItem, ShoppingList, UserId,
+    AggregateVersion, DisplayName, ItemDetails, ItemId, ItemOrder, ListId, ListName, ListOperation,
+    ListPermission, ShoppingItem, ShoppingList, UserId, UserProfile,
 };
 
 /// Persistence failures exposed by repository ports without storage-specific details.
@@ -36,6 +36,98 @@ pub enum RepositoryError {
     /// The aggregate cannot advance because its version reached the numeric limit.
     VersionExhausted,
     Unavailable,
+    /// A page cursor was not issued by this adapter for this query or is no longer valid.
+    InvalidCursor,
+}
+
+/// Bounded page size for cursor-based queries (roadmap B3).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PageSize(u32);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PageSizeError {
+    Zero,
+    TooLarge,
+}
+
+impl PageSize {
+    pub const MAX: u32 = 100;
+    pub const DEFAULT: Self = Self(50);
+
+    pub fn try_new(value: u32) -> Result<Self, PageSizeError> {
+        match value {
+            0 => Err(PageSizeError::Zero),
+            value if value > Self::MAX => Err(PageSizeError::TooLarge),
+            value => Ok(Self(value)),
+        }
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    /// The page size as a collection length.
+    pub fn as_usize(self) -> usize {
+        usize::try_from(self.0).unwrap_or(usize::MAX)
+    }
+}
+
+/// An opaque continuation token. Only the adapter that issued it can interpret it; clients
+/// must pass it back unchanged. Construction only bounds its size and characters.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PageCursor(String);
+
+impl PageCursor {
+    pub const MAX_LENGTH: usize = 512;
+
+    pub fn try_new(value: impl Into<String>) -> Result<Self, RepositoryError> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > Self::MAX_LENGTH
+            || !value.chars().all(|character| character.is_ascii_graphic())
+        {
+            return Err(RepositoryError::InvalidCursor);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PageRequest {
+    pub size: PageSize,
+    pub after: Option<PageCursor>,
+}
+
+/// One page of a stable order. `next` is present iff more entries may follow.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next: Option<PageCursor>,
+}
+
+/// Result of a version-based sync query (roadmap B5, ADR 004).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ListSync {
+    /// Full current state. Returned when the client has no version, a version the adapter
+    /// cannot derive changes from (for example newer than the stored one or older than the
+    /// retained change history), and always allowed in place of `Changes`.
+    Snapshot {
+        list: ShoppingList,
+        items: Vec<ShoppingItem>,
+    },
+    /// Everything that changed after `since`: items created or modified (current state) and
+    /// ids of items removed. Applying it to the client's state at `since` yields the current
+    /// state. An empty change set means the client is up to date.
+    Changes {
+        list: ShoppingList,
+        since: AggregateVersion,
+        changed: Vec<ShoppingItem>,
+        removed: Vec<ItemId>,
+    },
 }
 
 /// The verified principal and the permission an operation requires on its target list.
@@ -96,6 +188,18 @@ pub trait ShoppingListRepository: Send + Sync {
         &self,
         _principal: &UserId,
     ) -> impl Future<Output = Result<Vec<ShoppingList>, RepositoryError>> + Send {
+        async { Err(RepositoryError::Unavailable) }
+    }
+
+    /// Returns one page of accessible lists in a stable adapter-defined order.
+    ///
+    /// Access is resolved on every call. Lists created or removed between pages may be
+    /// missed or skipped but never duplicated. An unknown cursor yields `InvalidCursor`.
+    fn list_accessible_page(
+        &self,
+        _principal: &UserId,
+        _page: &PageRequest,
+    ) -> impl Future<Output = Result<Page<ShoppingList>, RepositoryError>> + Send {
         async { Err(RepositoryError::Unavailable) }
     }
 
@@ -164,6 +268,49 @@ pub trait ShoppingItemRepository: Send + Sync {
         async { Err(RepositoryError::Unavailable) }
     }
 
+    /// Returns one page of the list's items ordered by position.
+    ///
+    /// Authorization comes first: a principal without access receives `NotFound` even for a
+    /// malformed cursor. Cursors are bound to the list they were issued for.
+    fn list_items_page(
+        &self,
+        _access: &ListAccessRequest,
+        _list_id: &ListId,
+        _page: &PageRequest,
+    ) -> impl Future<Output = Result<Page<ShoppingItem>, RepositoryError>> + Send {
+        async { Err(RepositoryError::Unavailable) }
+    }
+
+    /// Reorders all items of a list and returns them ordered, with the parent-list version.
+    ///
+    /// After authorization, expected_list_version is compared atomically BEFORE anything
+    /// else: a stale version is `Conflict`, even for a no-op order. The order must name
+    /// exactly the current items, otherwise `Conflict` (the client's view is stale). Items
+    /// get positions `0..n`; moved items and the list version advance once, and only when
+    /// the order actually changes.
+    fn reorder_items(
+        &self,
+        _access: &ListAccessRequest,
+        _list_id: &ListId,
+        _expected_list_version: AggregateVersion,
+        _order: &ItemOrder,
+    ) -> impl Future<Output = Result<(Vec<ShoppingItem>, AggregateVersion), RepositoryError>> + Send
+    {
+        async { Err(RepositoryError::Unavailable) }
+    }
+
+    /// Returns the changes since `since` or a full snapshot (see [`ListSync`]).
+    ///
+    /// Authorization comes first. The list and items are read in one consistent view.
+    fn sync_list(
+        &self,
+        _access: &ListAccessRequest,
+        _list_id: &ListId,
+        _since: Option<AggregateVersion>,
+    ) -> impl Future<Output = Result<ListSync, RepositoryError>> + Send {
+        async { Err(RepositoryError::Unavailable) }
+    }
+
     /// Changes the item and returns it together with the new parent-list version.
     fn set_item_checked(
         &self,
@@ -201,6 +348,31 @@ pub trait ShoppingItemRepository: Send + Sync {
         item_id: &ItemId,
         expected_item_version: u64,
     ) -> impl Future<Output = Result<AggregateVersion, RepositoryError>> + Send;
+}
+
+/// Persists user profiles. Every operation is scoped to the verified principal: there is no
+/// way to address another user's profile, so no cross-user existence can leak.
+pub trait ProfileRepository: Send + Sync {
+    /// Creates the principal's profile; `AlreadyExists` if one exists.
+    fn create_profile(
+        &self,
+        profile: UserProfile,
+    ) -> impl Future<Output = Result<(), RepositoryError>> + Send;
+
+    /// Returns the principal's profile; `NotFound` if none exists.
+    fn get_profile(
+        &self,
+        principal: &UserId,
+    ) -> impl Future<Output = Result<UserProfile, RepositoryError>> + Send;
+
+    /// Changes the display name. expected_version is compared atomically BEFORE detecting a
+    /// no-op: a stale version is `Conflict` even for an unchanged name.
+    fn update_profile(
+        &self,
+        principal: &UserId,
+        expected_version: AggregateVersion,
+        display_name: DisplayName,
+    ) -> impl Future<Output = Result<UserProfile, RepositoryError>> + Send;
 }
 
 /// Generates list identifiers. Synchronous: generation must not perform I/O.

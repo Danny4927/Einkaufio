@@ -66,12 +66,12 @@ Goal: one user can do a complete shop with the list open on two devices.
 **Exit criterion:** deployed dev E2E test edits a list on two browser contexts; changes appear on the other within one polling interval; a stale write yields a visible 409 conflict instead of silent overwrite.
 
 - [ ] **B1 DynamoDB adapter for items:** implements the item port (add, update details, check/uncheck, delete) with atomic parent-list version updates, 100-active-item limit and unique positions; passes the shared item contract suite plus concurrency tests.
-- [ ] **B2 Item reorder use case:** domain/application/contract tests, then adapter and route.
-- [ ] **B3 List detail query and cursor-based pagination** for lists and items.
+- [ ] **B2 Item reorder use case:** domain/application/contract tests, then adapter and route. *Domain (`ItemOrder`, `ShoppingItem::move_to`), `ReorderShoppingItems` use case, `reorder_items` port, in-memory adapter and `run_item_reorder_contract` done; DynamoDB adapter and HTTP route pending.*
+- [ ] **B3 List detail query and cursor-based pagination** for lists and items. *`PageSize` (1–100, default 50)/opaque `PageCursor`, `PageAccessibleLists`/`PageShoppingItems` use cases, `list_accessible_page`/`list_items_page` ports, in-memory adapter and `run_pagination_contract` done; DynamoDB adapter, list detail and HTTP routes pending.*
 - [ ] **B4 Item HTTP routes** with authorization and concurrency contract tests.
-- [ ] **B5 Version-based sync endpoint** (`/api/lists/{listId}/sync`).
+- [ ] **B5 Version-based sync endpoint** (`/api/lists/{listId}/sync`). *`ListSync` (snapshot or changes since version N with tombstones), `SyncShoppingList` use case, `sync_list` port, in-memory adapter and `run_sync_contract`/`run_shared_query_contract` done; DynamoDB adapter, OpenAPI and HTTP route pending.*
 - [ ] **B6 Angular list editor:** item interactions, optimistic UI with 409 conflict handling, poll only the visible active list every 15 seconds, pause in background tabs, refresh on focus/reconnect; visual baselines for open/completed/empty/error states and mobile/desktop viewports.
-- [ ] **B7 Profile:** `/api/me` create/read/update via a profile use case and repository port.
+- [ ] **B7 Profile:** `/api/me` create/read/update via a profile use case and repository port. *`UserProfile`/`DisplayName` domain, `CreateProfile`/`GetProfile`/`UpdateProfile`, `ProfileRepository` port, in-memory adapter and `run_profile_contract` done; DynamoDB adapter, OpenAPI and HTTP route pending.*
 - [ ] **B8 Abuse controls:** request-size and input limits, application-level throttling per principal; CloudWatch alarms for Lambda errors/throttles and DynamoDB throttling; AWS Budget notification. *Alarms/budget prepared in `modules/monitoring` (not applied); request limits and per-principal throttling still open.*
 - Evidence: adapter contract and concurrency test reports, API contract tests, multi-client Playwright test, browser visibility test, visual regression report, alarm/budget configuration in Terraform plan.
 

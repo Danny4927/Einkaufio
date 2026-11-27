@@ -1,8 +1,8 @@
 //! Application use cases for shopping-list item mutations.
 
 use einkaufio_domain::{
-    AggregateVersion, ItemDetails, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit,
-    ItemValueError, ListId, ListOperation, ShoppingItem, UserId,
+    AggregateVersion, ItemDetails, ItemId, ItemName, ItemNote, ItemOrderError, ItemQuantity,
+    ItemUnit, ItemValueError, ListId, ListOperation, ShoppingItem, UserId,
 };
 
 use crate::ports::{ItemIdGenerator, ListAccessRequest, RepositoryError, ShoppingItemRepository};
@@ -29,6 +29,9 @@ pub enum ShoppingItemError {
     InvalidUnit(ItemValueError),
     InvalidNote(ItemValueError),
     InvalidExpectedVersion,
+    /// The requested order contains duplicates or too many items.
+    InvalidOrder(ItemOrderError),
+    InvalidCursor,
     ItemLimitReached,
     VersionExhausted,
     NotFound,
@@ -266,7 +269,7 @@ fn optional_value(value: Option<String>) -> Option<String> {
     })
 }
 
-fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
+pub(crate) fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
     match error {
         RepositoryError::NotFound => ShoppingItemError::NotFound,
         RepositoryError::Forbidden => ShoppingItemError::Forbidden,
@@ -274,6 +277,7 @@ fn map_repository_error(error: RepositoryError) -> ShoppingItemError {
         RepositoryError::ItemLimitReached => ShoppingItemError::ItemLimitReached,
         RepositoryError::VersionExhausted => ShoppingItemError::VersionExhausted,
         RepositoryError::Unavailable => ShoppingItemError::PersistenceUnavailable,
+        RepositoryError::InvalidCursor => ShoppingItemError::InvalidCursor,
     }
 }
 

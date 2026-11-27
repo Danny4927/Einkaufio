@@ -65,9 +65,8 @@ fn map_repository_error(error: RepositoryError) -> CreatePersonalListError {
         RepositoryError::NotFound
         | RepositoryError::Forbidden
         | RepositoryError::ItemLimitReached
-        | RepositoryError::VersionExhausted => {
-            CreatePersonalListError::RepositoryInvariantViolation
-        }
+        | RepositoryError::VersionExhausted
+        | RepositoryError::InvalidCursor => CreatePersonalListError::RepositoryInvariantViolation,
         RepositoryError::Unavailable => CreatePersonalListError::PersistenceUnavailable,
     }
 }
