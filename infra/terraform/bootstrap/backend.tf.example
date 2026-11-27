@@ -1,0 +1,10 @@
+# Copy to backend.tf after the first bootstrap apply, then run:
+#   terraform init -migrate-state -backend-config=../backend.hcl
+terraform {
+  backend "s3" {
+    key          = "einkaufio/bootstrap/terraform.tfstate"
+    region       = "eu-central-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

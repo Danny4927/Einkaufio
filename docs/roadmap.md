@@ -49,8 +49,8 @@ Goal: the thinnest end-to-end path, deployed to dev without manual console steps
 
 **Exit criterion:** a user signs in to the deployed dev PWA, creates a personal list and sees it after reload; an automated smoke test against dev proves the same path and runs in the deploy workflow.
 
-- [ ] **A1 Terraform state and dev root:** bootstrap root for a protected S3 state bucket (versioning, encryption, public access blocked, S3 native locking); migrate bootstrap state; dev root with its own state key. Pin Terraform/provider versions and commit the provider lock file.
-- [ ] **A2 Minimal dev infrastructure:** modules for DynamoDB PK/SK table, Cognito User Pool + public app client, ARM64 Lambda custom runtime + Function URL, private S3 + CloudFront/OAC, least-privilege Lambda IAM, log retention. Set reserved Lambda concurrency from the start as the first cost/abuse guard.
+- [ ] **A1 Terraform state and dev root:** bootstrap root for a protected S3 state bucket (versioning, encryption, public access blocked, S3 native locking); migrate bootstrap state; dev root with its own state key. Pin Terraform/provider versions and commit the provider lock file. *Prepared (code, lock file, runbook `docs/runbooks/terraform-bootstrap.md`); not applied, state not migrated.*
+- [ ] **A2 Minimal dev infrastructure:** modules for DynamoDB PK/SK table, Cognito User Pool + public app client, ARM64 Lambda custom runtime + Function URL, private S3 + CloudFront/OAC, least-privilege Lambda IAM, log retention. Set reserved Lambda concurrency from the start as the first cost/abuse guard. *Prepared as Terraform modules + dev root (validated, scanned); not applied.*
 - [ ] **A3 GitHub OIDC and deploy workflow:** OIDC role(s) with least privilege (separate plan/apply where practical), PR plan workflow, dev apply, build of Rust Lambda artifact and Angular assets, commit SHA recorded on the deployment.
 - [ ] **A4 Lambda entry point and composition root:** Lambda binary wiring `ApiState::from_cognito_env`, the DynamoDB adapter and an ID generator; abort startup on configuration errors; exact-origin CORS for the CloudFront domain.
 - [ ] **A5 DynamoDB adapter for personal lists:** implements the list port (create with owner index, list accessible lists, rename, delete with item cascade) with access resolution and atomic enforcement per ADR 015, using conditional writes/transactions; passes the shared list contract suite against DynamoDB Local or an equivalent in CI, plus adapter-specific transaction/conditional-write tests.
@@ -72,7 +72,7 @@ Goal: one user can do a complete shop with the list open on two devices.
 - [ ] **B5 Version-based sync endpoint** (`/api/lists/{listId}/sync`).
 - [ ] **B6 Angular list editor:** item interactions, optimistic UI with 409 conflict handling, poll only the visible active list every 15 seconds, pause in background tabs, refresh on focus/reconnect; visual baselines for open/completed/empty/error states and mobile/desktop viewports.
 - [ ] **B7 Profile:** `/api/me` create/read/update via a profile use case and repository port.
-- [ ] **B8 Abuse controls:** request-size and input limits, application-level throttling per principal; CloudWatch alarms for Lambda errors/throttles and DynamoDB throttling; AWS Budget notification.
+- [ ] **B8 Abuse controls:** request-size and input limits, application-level throttling per principal; CloudWatch alarms for Lambda errors/throttles and DynamoDB throttling; AWS Budget notification. *Alarms/budget prepared in `modules/monitoring` (not applied); request limits and per-principal throttling still open.*
 - Evidence: adapter contract and concurrency test reports, API contract tests, multi-client Playwright test, browser visibility test, visual regression report, alarm/budget configuration in Terraform plan.
 
 ## Phase C – Access model and collaboration
@@ -122,7 +122,7 @@ Items with a trigger are scheduled when the trigger is met, not before; they mus
 
 - [ ] **Pixel-baseline visual regression** (`toHaveScreenshot`) with reviewed baselines — *trigger:* first Angular feature screen (A7).
 - [ ] **Angular lint, unit tests in CI and import-boundary rules** — *trigger:* first Angular feature module (A7).
-- [ ] **Terraform static security scan** (Checkov or Trivy config) with reviewed findings — *trigger:* first real AWS resource (A2).
+- [ ] **Terraform static security scan** (Checkov or Trivy config) with reviewed findings *(prepared: `make terraform-scan`, Checkov, findings in `docs/terraform-scan.md`; not yet wired into CI)* — *trigger:* first real AWS resource (A2).
 - [ ] **Publish Terraform plan summary as PR artifact** — *trigger:* A3.
 - [ ] **Secret scanning** in CI — *trigger:* A3 (first workflow handling cloud credentials).
 - [ ] **`cargo-deny`** policy (licenses, advisories, bans, sources), pinned — *trigger:* A4/A5 introduce AWS SDK dependencies.

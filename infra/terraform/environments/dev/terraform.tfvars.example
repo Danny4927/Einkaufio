@@ -1,0 +1,5 @@
+lambda_package_path   = "../../../../backend/target/lambda/einkaufio-api/bootstrap.zip"
+web_bucket_name       = "einkaufio-dev-web-<account-id>"
+cognito_domain_prefix = "einkaufio-dev-<suffix>"
+web_origins           = ["https://<distribution>.cloudfront.net", "http://localhost:4200"]
+alert_emails          = ["ops@example.com"]

@@ -1,0 +1,2 @@
+# Copy to backend.hcl (git-ignored) and set the bootstrap output state_bucket_name.
+bucket = "einkaufio-tfstate-<account-id>"

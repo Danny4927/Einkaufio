@@ -3,12 +3,12 @@ WEB_DIR := apps/web
 TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -exec dirname {} \; | sort -u)
 PLAYWRIGHT_INSTALL ?= npx playwright install chromium
 
-.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate web-install web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
+.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture terraform-fmt terraform-validate terraform-scan web-install web-lint web-test web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
 
 check: fmt lint test-workspace architecture terraform-fmt yaml-lint
 verify: ci-backend ci-web ci-terraform ci-contracts agent-config-check
 ci-backend: fmt lint test-workspace architecture
-ci-web: web-install
+ci-web: web-install web-lint web-test
 	cd $(WEB_DIR) && npm run build
 	cd $(WEB_DIR) && $(PLAYWRIGHT_INSTALL)
 	cd $(WEB_DIR) && npm run e2e
@@ -30,6 +30,10 @@ architecture:
 	python3 scripts/check_architecture.py
 web-install:
 	cd $(WEB_DIR) && npm ci --no-audit --no-fund
+web-lint: web-install
+	cd $(WEB_DIR) && npm run lint
+web-test: web-install
+	cd $(WEB_DIR) && npm test
 web-build: web-install
 	cd $(WEB_DIR) && npm run build
 web-e2e-setup:
@@ -43,6 +47,9 @@ terraform-validate:
 		terraform -chdir="$$dir" init -backend=false -input=false; \
 		terraform -chdir="$$dir" validate; \
 	done
+CHECKOV ?= checkov
+terraform-scan:
+	$(CHECKOV) --directory infra/terraform --framework terraform --compact --quiet --download-external-modules false --skip-download
 REDOCLY_CLI ?= @redocly/cli@1.34.5
 ci-contracts: yaml-lint openapi-lint
 yaml-lint:
