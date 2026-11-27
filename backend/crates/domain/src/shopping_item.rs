@@ -18,6 +18,13 @@ pub enum ItemValueError {
     ContainsControlCharacters,
 }
 
+/// Item mutation failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ItemMutationError {
+    /// The item version reached the numeric limit and cannot advance.
+    VersionExhausted,
+}
+
 /// Validated, client-editable item attributes.
 ///
 /// Check state, position, version and creator are deliberately excluded: they are changed only
@@ -142,13 +149,21 @@ impl ShoppingItem {
     }
 
     /// Applies a check-state change and advances the item version only when needed.
-    pub fn set_checked(&mut self, checked: bool) -> bool {
+    ///
+    /// On version exhaustion the item is left unchanged.
+    pub fn set_checked(&mut self, checked: bool) -> Result<bool, ItemMutationError> {
         if self.checked == checked {
-            return false;
+            return Ok(false);
         }
+        self.version = self.next_version()?;
         self.checked = checked;
-        self.version += 1;
-        true
+        Ok(true)
+    }
+
+    fn next_version(&self) -> Result<u64, ItemMutationError> {
+        self.version
+            .checked_add(1)
+            .ok_or(ItemMutationError::VersionExhausted)
     }
 
     /// Returns the current editable attributes.
@@ -162,16 +177,18 @@ impl ShoppingItem {
     }
 
     /// Replaces the editable attributes and advances the item version only when they change.
-    pub fn update_details(&mut self, details: ItemDetails) -> bool {
+    ///
+    /// On version exhaustion the item is left unchanged.
+    pub fn update_details(&mut self, details: ItemDetails) -> Result<bool, ItemMutationError> {
         if self.details() == details {
-            return false;
+            return Ok(false);
         }
+        self.version = self.next_version()?;
         self.name = details.name;
         self.quantity = details.quantity;
         self.unit = details.unit;
         self.note = details.note;
-        self.version += 1;
-        true
+        Ok(true)
     }
 }
 
@@ -219,31 +236,54 @@ mod tests {
     #[test]
     fn checking_changes_state_and_increments_once() {
         let mut item = item();
-        assert!(item.set_checked(true));
+        assert_eq!(item.set_checked(true), Ok(true));
         assert!(item.checked());
         assert_eq!(item.version(), 2);
-        assert!(!item.set_checked(true));
+        assert_eq!(item.set_checked(true), Ok(false));
         assert_eq!(item.version(), 2);
-        assert!(item.set_checked(false));
+        assert_eq!(item.set_checked(false), Ok(true));
         assert_eq!(item.version(), 3);
     }
 
     #[test]
     fn updating_details_changes_attributes_and_increments_once() {
         let mut item = item();
-        item.set_checked(true);
+        item.set_checked(true).unwrap();
         let details = ItemDetails {
             name: ItemName::try_new("Hafermilch").unwrap(),
             quantity: None,
             unit: Some(ItemUnit::try_new("Packung").unwrap()),
             note: Some(ItemNote::try_new("ungesüßt").unwrap()),
         };
-        assert!(item.update_details(details.clone()));
+        assert_eq!(item.update_details(details.clone()), Ok(true));
         assert_eq!(item.details(), details);
         assert_eq!(item.version(), 3);
         assert!(item.checked(), "check state is not part of the details");
         assert_eq!(item.position(), 0);
-        assert!(!item.update_details(details));
+        assert_eq!(item.update_details(details), Ok(false));
         assert_eq!(item.version(), 3);
+    }
+
+    #[test]
+    fn exhausted_version_fails_without_changing_the_item() {
+        let mut item = item();
+        item.version = u64::MAX;
+        let before = item.clone();
+        assert_eq!(
+            item.set_checked(true),
+            Err(ItemMutationError::VersionExhausted)
+        );
+        let details = ItemDetails {
+            name: ItemName::try_new("Brot").unwrap(),
+            ..item.details()
+        };
+        assert_eq!(
+            item.update_details(details),
+            Err(ItemMutationError::VersionExhausted)
+        );
+        assert_eq!(item, before);
+        // No-op changes never need a new version, so they still succeed at the limit.
+        assert_eq!(item.set_checked(false), Ok(false));
+        assert_eq!(item.update_details(before.details()), Ok(false));
     }
 }

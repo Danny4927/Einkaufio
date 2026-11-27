@@ -183,7 +183,10 @@ impl ShoppingItemRepository for InMemoryRepository {
             return Err(RepositoryError::Conflict);
         }
         let mut updated = stored.clone();
-        if updated.set_checked(checked) {
+        if updated
+            .set_checked(checked)
+            .map_err(|_| RepositoryError::VersionExhausted)?
+        {
             let list = state
                 .lists
                 .get_mut(list_id)
@@ -217,7 +220,10 @@ impl ShoppingItemRepository for InMemoryRepository {
             return Err(RepositoryError::Conflict);
         }
         let mut updated = stored.clone();
-        if updated.update_details(details) {
+        if updated
+            .update_details(details)
+            .map_err(|_| RepositoryError::VersionExhausted)?
+        {
             let list = state
                 .lists
                 .get_mut(list_id)

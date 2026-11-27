@@ -338,7 +338,7 @@ mod tests {
                 0,
                 actor_id.clone(),
             );
-            item.set_checked(checked);
+            item.set_checked(checked).unwrap();
             // Set an independently controlled value in the fake so the test can prove the
             // returned list version is not accidentally read from the item version.
             Ok((
@@ -376,7 +376,7 @@ mod tests {
                 0,
                 actor_id.clone(),
             );
-            item.update_details(details);
+            item.update_details(details).unwrap();
             Ok((
                 item,
                 AggregateVersion::try_new(expected_version + 10).unwrap(),
