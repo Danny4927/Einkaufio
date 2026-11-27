@@ -28,7 +28,7 @@ jobs:
         run: make ci-backend
 
   web:
-    name: web / build-e2e-visual-capture
+    name: web / lint-unit-build-e2e-visual-capture
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - name: Pin npm
         run: npm install --global npm@10.9.2
-      - name: Build, install Playwright and run E2E/screenshot smoke tests
+      - name: Lint, unit test, build, install Playwright and run E2E/screenshot smoke tests
         run: make ci-web PLAYWRIGHT_INSTALL="npx playwright install --with-deps chromium"
       - name: Upload Playwright evidence
         if: always()

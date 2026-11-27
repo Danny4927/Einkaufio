@@ -11,7 +11,8 @@
     "build": "ng build --configuration production",
     "test": "ng test --watch=false",
     "e2e": "playwright test",
-    "e2e:visual": "playwright test tests/visual"
+    "e2e:visual": "playwright test tests/visual",
+    "lint": "ng lint"
   },
   "dependencies": {
     "@angular/common": "22.3.0",
@@ -27,7 +28,13 @@
     "@angular/cli": "22.3.0",
     "@angular/compiler-cli": "22.3.0",
     "@playwright/test": "1.65.1",
-    "typescript": "6.0.3"
+    "angular-eslint": "22.8.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-boundaries": "7.4.5",
+    "jsdom": "31.0.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.74.0",
+    "vitest": "5.1.2"
   },
   "packageManager": "npm@10.9.2"
 }
