@@ -10,6 +10,13 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock};
 
+/// Allowed clock skew in seconds for exp, nbf and iat checks.
+const CLOCK_SKEW_SECS: u64 = 30;
+/// Global minimum interval between JWKS fetches, including failed fetches.
+const REFRESH_COOLDOWN_SECS: u64 = 30;
+/// Lifetime of a successfully fetched JWKS.
+const JWKS_TTL_SECS: u64 = 300;
+
 #[derive(Clone, Debug)]
 pub struct CognitoConfig {
     pub issuer: String,
@@ -26,9 +33,9 @@ impl CognitoConfig {
         let pool = pool.trim().to_owned();
         let client = client.trim().to_owned();
 
-        if region.trim().is_empty()
-            || pool.trim().is_empty()
-            || client.trim().is_empty()
+        if region.is_empty()
+            || pool.is_empty()
+            || client.is_empty()
             || pool.split('_').next().unwrap_or_default() != region
         {
             return Err(AuthError::Unavailable);
@@ -151,7 +158,7 @@ impl CognitoTokenVerifier {
             // Unknown kids are negatively cached by throttling refresh attempts globally.
             if cache
                 .last_refresh_at
-                .is_some_and(|last| now.saturating_sub(last) < 30)
+                .is_some_and(|last| now.saturating_sub(last) < REFRESH_COOLDOWN_SECS)
             {
                 return Err(if cache.last_refresh_failed {
                     AuthError::Unavailable
@@ -168,6 +175,8 @@ impl CognitoTokenVerifier {
             cache.last_refresh_failed = true;
         }
 
+        // The refresh lock is held across this bounded (3 s) fetch on purpose: concurrent
+        // callers wait for one fetch instead of each issuing their own request.
         // Never follow jku/x5u supplied by an untrusted token header.
         let jwks: Jwks = self
             .client
@@ -198,7 +207,7 @@ impl CognitoTokenVerifier {
 
         let mut cache = self.cache.write().await;
         cache.keys = keys;
-        cache.expires_at = now.saturating_add(300);
+        cache.expires_at = now.saturating_add(JWKS_TTL_SECS);
         cache.last_refresh_at = Some(now);
         cache.last_refresh_failed = false;
         cache.keys.get(kid).cloned().ok_or(AuthError::InvalidToken)
@@ -217,8 +226,9 @@ impl CognitoTokenVerifier {
         validation.set_issuer(&[self.config.issuer.as_str()]);
         validation.validate_exp = true;
         validation.validate_nbf = true;
-        validation.leeway = 30;
-        // Cognito access tokens use client_id, rather than aud, for app-client binding.
+        validation.leeway = CLOCK_SKEW_SECS;
+        // Cognito access tokens carry no aud; app-client binding uses client_id below.
+        validation.validate_aud = false;
         validation.required_spec_claims.clear();
 
         let claims = decode::<Claims>(token, &key, &validation)
@@ -230,11 +240,12 @@ impl CognitoTokenVerifier {
             .as_secs();
 
         if claims.iss != self.config.issuer
-            || claims.exp <= now
-            || claims.iat > now.saturating_add(30)
+            // Same skew as the library check above, so both checks agree.
+            || claims.exp.saturating_add(CLOCK_SKEW_SECS) <= now
+            || claims.iat > now.saturating_add(CLOCK_SKEW_SECS)
             || claims
                 .nbf
-                .is_some_and(|value| value > now.saturating_add(30))
+                .is_some_and(|value| value > now.saturating_add(CLOCK_SKEW_SECS))
             || claims.token_use != "access"
             || claims.client_id != self.config.app_client_id
             || claims.sub.trim().is_empty()
@@ -249,7 +260,7 @@ impl CognitoTokenVerifier {
 }
 
 #[cfg(test)]
-mod jwks_integration_tests {
+pub(crate) mod jwks_integration_tests {
     use super::*;
     use axum::{Json, extract::State, routing::get};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -261,20 +272,35 @@ mod jwks_integration_tests {
         traits::PublicKeyParts,
     };
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::{net::TcpListener, sync::RwLock, task::JoinHandle};
 
-    struct Fixture {
-        verifier: CognitoTokenVerifier,
+    pub(crate) struct Fixture {
+        pub(crate) verifier: CognitoTokenVerifier,
         document: Arc<RwLock<Value>>,
-        private_pem: String,
-        server: JoinHandle<()>,
+        fetches: Arc<AtomicUsize>,
+        pub(crate) private_pem: String,
+        pub(crate) server: JoinHandle<()>,
     }
 
-    async fn serve_jwks(State(doc): State<Arc<RwLock<Value>>>) -> Json<Value> {
-        Json(doc.read().await.clone())
+    impl Fixture {
+        fn fetch_count(&self) -> usize {
+            self.fetches.load(Ordering::SeqCst)
+        }
     }
 
-    async fn fixture() -> Fixture {
+    #[derive(Clone)]
+    struct JwksServerState {
+        document: Arc<RwLock<Value>>,
+        fetches: Arc<AtomicUsize>,
+    }
+
+    async fn serve_jwks(State(state): State<JwksServerState>) -> Json<Value> {
+        state.fetches.fetch_add(1, Ordering::SeqCst);
+        Json(state.document.read().await.clone())
+    }
+
+    pub(crate) async fn fixture() -> Fixture {
         let private = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
         let n = URL_SAFE_NO_PAD.encode(private.n().to_bytes_be());
@@ -282,9 +308,13 @@ mod jwks_integration_tests {
         let document = Arc::new(RwLock::new(json!({"keys":[{
             "kid":"key-1","kty":"RSA","alg":"RS256","use":"sig","n":n,"e":e
         }]})));
+        let fetches = Arc::new(AtomicUsize::new(0));
         let app = axum::Router::new()
             .route("/.well-known/jwks.json", get(serve_jwks))
-            .with_state(document.clone());
+            .with_state(JwksServerState {
+                document: document.clone(),
+                fetches: fetches.clone(),
+            });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -300,12 +330,13 @@ mod jwks_integration_tests {
         Fixture {
             verifier,
             document,
+            fetches,
             private_pem,
             server,
         }
     }
 
-    fn claims(overrides: Value) -> Value {
+    pub(crate) fn claims(overrides: Value) -> Value {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -320,7 +351,7 @@ mod jwks_integration_tests {
         value
     }
 
-    fn signed_token(pem: &str, kid: &str, claims: Value) -> String {
+    pub(crate) fn signed_token(pem: &str, kid: &str, claims: Value) -> String {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(kid.into());
         encode(
@@ -411,6 +442,89 @@ mod jwks_integration_tests {
         let f = fixture().await;
         let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
         assert_eq!(verifier.verify(&token).await, Err(AuthError::Unavailable));
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn unknown_key_id_within_cooldown_is_rejected_without_refetch() {
+        let f = fixture().await;
+        let valid = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        assert!(f.verifier.verify(&valid).await.is_ok());
+        assert_eq!(f.fetch_count(), 1);
+
+        for kid in ["random-1", "random-2", "random-3"] {
+            let token = signed_token(&f.private_pem, kid, claims(json!({})));
+            assert_eq!(
+                f.verifier.verify(&token).await,
+                Err(AuthError::InvalidToken)
+            );
+        }
+        assert_eq!(f.fetch_count(), 1, "cooldown must suppress refetches");
+
+        // Known keys keep working from the cache during the cooldown.
+        assert!(f.verifier.verify(&valid).await.is_ok());
+        assert_eq!(f.fetch_count(), 1);
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_is_throttled_and_reports_unavailable() {
+        let f = fixture().await;
+        let verifier = CognitoTokenVerifier::new_with_jwks_url(
+            f.verifier.config.clone(),
+            "http://127.0.0.1:1/.well-known/jwks.json".into(),
+        )
+        .unwrap();
+        let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        assert_eq!(verifier.verify(&token).await, Err(AuthError::Unavailable));
+        let first_attempt = verifier.cache.read().await.last_refresh_at;
+        assert!(first_attempt.is_some());
+
+        // Within the cooldown, no new attempt is made and the outage is still reported.
+        assert_eq!(verifier.verify(&token).await, Err(AuthError::Unavailable));
+        let cache = verifier.cache.read().await;
+        assert_eq!(cache.last_refresh_at, first_attempt);
+        assert!(cache.last_refresh_failed);
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn concurrent_cold_cache_requests_share_one_fetch() {
+        let f = fixture().await;
+        let token = signed_token(&f.private_pem, "key-1", claims(json!({})));
+        let verifier = Arc::new(f.verifier.clone());
+        let tasks = (0..16)
+            .map(|_| {
+                let verifier = verifier.clone();
+                let token = token.clone();
+                tokio::spawn(async move { verifier.verify(&token).await })
+            })
+            .collect::<Vec<_>>();
+        for task in tasks {
+            assert!(task.await.unwrap().is_ok());
+        }
+        assert_eq!(f.fetch_count(), 1);
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn expiry_uses_the_documented_clock_skew() {
+        let f = fixture().await;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let within_skew = signed_token(&f.private_pem, "key-1", claims(json!({"exp": now - 5})));
+        assert!(f.verifier.verify(&within_skew).await.is_ok());
+        let beyond_skew = signed_token(
+            &f.private_pem,
+            "key-1",
+            claims(json!({"exp": now - CLOCK_SKEW_SECS - 5})),
+        );
+        assert_eq!(
+            f.verifier.verify(&beyond_skew).await,
+            Err(AuthError::InvalidToken)
+        );
         f.server.abort();
     }
 }
