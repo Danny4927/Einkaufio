@@ -26,7 +26,8 @@ pub use rename_personal_list::{
 };
 pub use shopping_items::{
     AddShoppingItem, AddShoppingItemCommand, DeleteShoppingItem, DeleteShoppingItemCommand,
-    SetShoppingItemChecked, SetShoppingItemCheckedCommand, ShoppingItemError,
+    SetShoppingItemChecked, SetShoppingItemCheckedCommand, ShoppingItemError, UpdateShoppingItem,
+    UpdateShoppingItemCommand,
 };
 
 pub use einkaufio_domain::ShoppingList;

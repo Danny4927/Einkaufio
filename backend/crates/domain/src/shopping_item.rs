@@ -18,6 +18,18 @@ pub enum ItemValueError {
     ContainsControlCharacters,
 }
 
+/// Validated, client-editable item attributes.
+///
+/// Check state, position, version and creator are deliberately excluded: they are changed only
+/// through dedicated operations or assigned by the repository.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ItemDetails {
+    pub name: ItemName,
+    pub quantity: Option<ItemQuantity>,
+    pub unit: Option<ItemUnit>,
+    pub note: Option<ItemNote>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShoppingItem {
     id: ItemId,
@@ -138,6 +150,29 @@ impl ShoppingItem {
         self.version += 1;
         true
     }
+
+    /// Returns the current editable attributes.
+    pub fn details(&self) -> ItemDetails {
+        ItemDetails {
+            name: self.name.clone(),
+            quantity: self.quantity.clone(),
+            unit: self.unit.clone(),
+            note: self.note.clone(),
+        }
+    }
+
+    /// Replaces the editable attributes and advances the item version only when they change.
+    pub fn update_details(&mut self, details: ItemDetails) -> bool {
+        if self.details() == details {
+            return false;
+        }
+        self.name = details.name;
+        self.quantity = details.quantity;
+        self.unit = details.unit;
+        self.note = details.note;
+        self.version += 1;
+        true
+    }
 }
 
 #[cfg(test)]
@@ -190,6 +225,25 @@ mod tests {
         assert!(!item.set_checked(true));
         assert_eq!(item.version(), 2);
         assert!(item.set_checked(false));
+        assert_eq!(item.version(), 3);
+    }
+
+    #[test]
+    fn updating_details_changes_attributes_and_increments_once() {
+        let mut item = item();
+        item.set_checked(true);
+        let details = ItemDetails {
+            name: ItemName::try_new("Hafermilch").unwrap(),
+            quantity: None,
+            unit: Some(ItemUnit::try_new("Packung").unwrap()),
+            note: Some(ItemNote::try_new("ungesüßt").unwrap()),
+        };
+        assert!(item.update_details(details.clone()));
+        assert_eq!(item.details(), details);
+        assert_eq!(item.version(), 3);
+        assert!(item.checked(), "check state is not part of the details");
+        assert_eq!(item.position(), 0);
+        assert!(!item.update_details(details));
         assert_eq!(item.version(), 3);
     }
 }

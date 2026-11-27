@@ -8,7 +8,9 @@ pub mod shopping_item;
 pub mod shopping_list;
 
 pub use identifiers::{IdentifierError, ItemId, ListId, UserId};
-pub use shopping_item::{ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ShoppingItem};
+pub use shopping_item::{
+    ItemDetails, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ShoppingItem,
+};
 pub use shopping_list::{
     AggregateVersion, AggregateVersionError, ListMutationError, ListName, ListNameError,
     ShoppingList,

@@ -1,7 +1,7 @@
 //! Outbound ports owned by the application layer.
 
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId,
+    AggregateVersion, ItemDetails, ItemId, ListId, ListName, ShoppingItem, ShoppingList, UserId,
 };
 
 /// Persistence failures exposed by repository ports without storage-specific details.
@@ -110,6 +110,24 @@ pub trait ShoppingItemRepository {
         expected_item_version: u64,
         checked: bool,
     ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError>;
+
+    /// Replaces the editable item details and returns the item with the parent-list version.
+    ///
+    /// The adapter must authorize before revealing list/item existence and compare
+    /// expected_item_version atomically BEFORE detecting a no-op update: a stale version MUST
+    /// return Conflict even when the details are unchanged. Item and list versions advance
+    /// together, and only when the details actually change. Check state and position are
+    /// preserved. The fail-closed default keeps existing adapters safe until implemented.
+    fn update_item_details(
+        &self,
+        _actor_id: &UserId,
+        _list_id: &ListId,
+        _item_id: &ItemId,
+        _expected_item_version: u64,
+        _details: ItemDetails,
+    ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+        Err(RepositoryError::Unavailable)
+    }
 
     /// Deletes the item and returns the new parent-list version.
     fn delete_item(

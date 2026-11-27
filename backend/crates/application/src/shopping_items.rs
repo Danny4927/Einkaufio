@@ -1,8 +1,8 @@
 //! Application use cases for shopping-list item mutations.
 
 use einkaufio_domain::{
-    AggregateVersion, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit, ItemValueError, ListId,
-    ShoppingItem, UserId,
+    AggregateVersion, ItemDetails, ItemId, ItemName, ItemNote, ItemQuantity, ItemUnit,
+    ItemValueError, ListId, ShoppingItem, UserId,
 };
 
 use crate::ports::{ItemIdGenerator, RepositoryError, ShoppingItemRepository};
@@ -63,20 +63,12 @@ impl<'a> AddShoppingItem<'a> {
         if command.expected_list_version == 0 {
             return Err(ShoppingItemError::InvalidExpectedVersion);
         }
-        let name = ItemName::try_new(command.name).map_err(ShoppingItemError::InvalidName)?;
-        // Empty optional form fields are normalized to None before constructing value objects.
-        let quantity = optional_value(command.quantity)
-            .map(ItemQuantity::try_new)
-            .transpose()
-            .map_err(ShoppingItemError::InvalidQuantity)?;
-        let unit = optional_value(command.unit)
-            .map(ItemUnit::try_new)
-            .transpose()
-            .map_err(ShoppingItemError::InvalidUnit)?;
-        let note = optional_value(command.note)
-            .map(ItemNote::try_new)
-            .transpose()
-            .map_err(ShoppingItemError::InvalidNote)?;
+        let ItemDetails {
+            name,
+            quantity,
+            unit,
+            note,
+        } = item_details(command.name, command.quantity, command.unit, command.note)?;
         let item_id = ItemId::try_new(self.id_generator.generate())
             .map_err(|_| ShoppingItemError::InvalidItemId)?;
         // Position is deliberately not client-controlled. The adapter assigns the next unique
@@ -143,6 +135,57 @@ impl<'a> SetShoppingItemChecked<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateShoppingItemCommand {
+    /// Derived from verified authentication context, never accepted from the client body.
+    pub actor_id: String,
+    pub list_id: String,
+    pub item_id: String,
+    pub expected_item_version: u64,
+    /// Full replacement of the editable details; empty optional fields clear the value.
+    pub name: String,
+    pub quantity: Option<String>,
+    pub unit: Option<String>,
+    pub note: Option<String>,
+}
+
+pub struct UpdateShoppingItem<'a> {
+    repository: &'a dyn ShoppingItemRepository,
+}
+
+impl<'a> UpdateShoppingItem<'a> {
+    pub fn new(repository: &'a dyn ShoppingItemRepository) -> Self {
+        Self { repository }
+    }
+
+    /// Returns the persisted item and the parent-list version after the update.
+    pub fn execute(
+        &self,
+        command: UpdateShoppingItemCommand,
+    ) -> Result<(ShoppingItem, u64), ShoppingItemError> {
+        let actor =
+            UserId::try_new(command.actor_id).map_err(|_| ShoppingItemError::InvalidActor)?;
+        let list_id =
+            ListId::try_new(command.list_id).map_err(|_| ShoppingItemError::InvalidListId)?;
+        let item_id =
+            ItemId::try_new(command.item_id).map_err(|_| ShoppingItemError::InvalidItemId)?;
+        if command.expected_item_version == 0 {
+            return Err(ShoppingItemError::InvalidExpectedVersion);
+        }
+        let details = item_details(command.name, command.quantity, command.unit, command.note)?;
+        self.repository
+            .update_item_details(
+                &actor,
+                &list_id,
+                &item_id,
+                command.expected_item_version,
+                details,
+            )
+            .map(|(item, version)| (item, version.as_u64()))
+            .map_err(map_repository_error)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeleteShoppingItemCommand {
     /// Derived from verified authentication context, never accepted from the client body.
     pub actor_id: String,
@@ -178,6 +221,34 @@ impl<'a> DeleteShoppingItem<'a> {
     }
 }
 
+fn item_details(
+    name: String,
+    quantity: Option<String>,
+    unit: Option<String>,
+    note: Option<String>,
+) -> Result<ItemDetails, ShoppingItemError> {
+    let name = ItemName::try_new(name).map_err(ShoppingItemError::InvalidName)?;
+    // Empty optional form fields are normalized to None before constructing value objects.
+    let quantity = optional_value(quantity)
+        .map(ItemQuantity::try_new)
+        .transpose()
+        .map_err(ShoppingItemError::InvalidQuantity)?;
+    let unit = optional_value(unit)
+        .map(ItemUnit::try_new)
+        .transpose()
+        .map_err(ShoppingItemError::InvalidUnit)?;
+    let note = optional_value(note)
+        .map(ItemNote::try_new)
+        .transpose()
+        .map_err(ShoppingItemError::InvalidNote)?;
+    Ok(ItemDetails {
+        name,
+        quantity,
+        unit,
+        note,
+    })
+}
+
 fn optional_value(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -211,6 +282,7 @@ mod tests {
         added: RefCell<Vec<(UserId, String, u64, ShoppingItem)>>,
         checked: RefCell<Vec<CheckedCall>>,
         deleted: RefCell<Vec<(UserId, String, ItemId, u64)>>,
+        updated: RefCell<Vec<(UserId, ItemId, u64, ItemDetails)>>,
         failure: Option<RepositoryError>,
         list_version_after_mutation: u64,
     }
@@ -275,6 +347,39 @@ mod tests {
                     self.list_version_after_mutation.max(expected_version + 10),
                 )
                 .unwrap(),
+            ))
+        }
+
+        fn update_item_details(
+            &self,
+            actor_id: &UserId,
+            _list_id: &ListId,
+            item_id: &ItemId,
+            expected_version: u64,
+            details: ItemDetails,
+        ) -> Result<(ShoppingItem, AggregateVersion), RepositoryError> {
+            if let Some(error) = &self.failure {
+                return Err(error.clone());
+            }
+            self.updated.borrow_mut().push((
+                actor_id.clone(),
+                item_id.clone(),
+                expected_version,
+                details.clone(),
+            ));
+            let mut item = ShoppingItem::new(
+                item_id.clone(),
+                ItemName::try_new("Alt").unwrap(),
+                None,
+                None,
+                None,
+                0,
+                actor_id.clone(),
+            );
+            item.update_details(details);
+            Ok((
+                item,
+                AggregateVersion::try_new(expected_version + 10).unwrap(),
             ))
         }
 
@@ -568,5 +673,132 @@ mod tests {
             DeleteShoppingItem::new(&unavailable).execute(delete_command()),
             Err(ShoppingItemError::PersistenceUnavailable)
         );
+    }
+
+    fn update_command() -> UpdateShoppingItemCommand {
+        UpdateShoppingItemCommand {
+            actor_id: "user-1".into(),
+            list_id: "list-1".into(),
+            item_id: "item-1".into(),
+            expected_item_version: 3,
+            name: " Hafermilch ".into(),
+            quantity: Some(" ".into()),
+            unit: Some("Packung".into()),
+            note: None,
+        }
+    }
+
+    #[test]
+    fn update_forwards_normalized_details_and_returns_versions() {
+        let repository = FakeRepository::default();
+        let (item, list_version) = UpdateShoppingItem::new(&repository)
+            .execute(update_command())
+            .unwrap();
+        assert_eq!(item.name().as_str(), "Hafermilch");
+        assert_eq!(item.quantity(), None);
+        assert_eq!(item.unit().unwrap().as_str(), "Packung");
+        assert_eq!(list_version, 13);
+        let calls = repository.updated.borrow();
+        assert_eq!(calls.len(), 1);
+        let (actor, item_id, expected, details) = &calls[0];
+        assert_eq!(actor.as_str(), "user-1");
+        assert_eq!(item_id.as_str(), "item-1");
+        assert_eq!(*expected, 3);
+        assert_eq!(details.name.as_str(), "Hafermilch");
+        assert_eq!(details.quantity, None);
+        assert_eq!(details.note, None);
+    }
+
+    #[test]
+    fn update_validates_before_calling_repository() {
+        let repository = FakeRepository::default();
+        let use_case = UpdateShoppingItem::new(&repository);
+        let cases = [
+            (
+                UpdateShoppingItemCommand {
+                    actor_id: " ".into(),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidActor,
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    list_id: " ".into(),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidListId,
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    item_id: " ".into(),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidItemId,
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    expected_item_version: 0,
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidExpectedVersion,
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    name: "  ".into(),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidName(ItemValueError::Empty),
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    quantity: Some("x".repeat(41)),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidQuantity(ItemValueError::TooLong),
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    unit: Some("a\tb".into()),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidUnit(ItemValueError::ContainsControlCharacters),
+            ),
+            (
+                UpdateShoppingItemCommand {
+                    note: Some("n".repeat(501)),
+                    ..update_command()
+                },
+                ShoppingItemError::InvalidNote(ItemValueError::TooLong),
+            ),
+        ];
+        for (command, expected) in cases {
+            assert_eq!(use_case.execute(command), Err(expected));
+        }
+        assert!(repository.updated.borrow().is_empty());
+    }
+
+    #[test]
+    fn update_maps_repository_errors() {
+        for (failure, expected) in [
+            (RepositoryError::NotFound, ShoppingItemError::NotFound),
+            (RepositoryError::Conflict, ShoppingItemError::Conflict),
+            (
+                RepositoryError::VersionExhausted,
+                ShoppingItemError::VersionExhausted,
+            ),
+            (
+                RepositoryError::Unavailable,
+                ShoppingItemError::PersistenceUnavailable,
+            ),
+        ] {
+            let repository = FakeRepository {
+                failure: Some(failure),
+                ..FakeRepository::default()
+            };
+            assert_eq!(
+                UpdateShoppingItem::new(&repository).execute(update_command()),
+                Err(expected)
+            );
+        }
     }
 }
