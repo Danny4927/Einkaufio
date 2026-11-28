@@ -1,0 +1,40 @@
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow">Weniger vergessen. Mehr gemeinsam.</p>
+    <h1 id="hero-title">Einkaufen, das <span>zusammen</span> leichter geht.</h1>
+    <p class="intro">Eine gemeinsame Liste für alle, die zusammen planen, einkaufen und den Überblick behalten möchten.</p>
+    @if (hint(); as message) {
+      <p class="hint" role="status">{{ message }}</p>
+    }
+    <div class="actions">
+      @if (auth.isAuthenticated()) {
+        <a class="primary" routerLink="/listen">Zu meinen Listen <span aria-hidden="true">→</span></a>
+      } @else {
+        <button class="primary" type="button" (click)="signIn()">Anmelden <span aria-hidden="true">→</span></button>
+      }
+      <a class="secondary" href="#features">So funktioniert Einkaufio</a>
+    </div>
+  </div>
+  <div class="list-preview">
+    <div class="preview-heading">
+      <div><p class="preview-label">EURE LISTE</p><h2>Wocheneinkauf</h2></div>
+      <span class="avatar-stack" role="img" aria-label="Zwei Personen teilen diese Liste"><span>M</span><span>L</span></span>
+    </div>
+    <ul class="preview-items" aria-label="Vorschau einer Einkaufsliste">
+      <li><span class="fake-check checked" aria-hidden="true">✓</span><span class="done">Hafermilch</span><small>1 l</small></li>
+      <li><span class="fake-check" aria-hidden="true"></span><span>Äpfel</span><small>6 Stück</small></li>
+      <li><span class="fake-check" aria-hidden="true"></span><span>Vollkornbrot</span><small>1 Laib</small></li>
+      <li><span class="fake-check" aria-hidden="true"></span><span>Kaffee</span><small>1 Packung</small></li>
+    </ul>
+    <div class="preview-footer"><span class="live-dot"></span> Gemeinsam aktuell</div>
+  </div>
+</section>
+<section class="features" id="features" aria-labelledby="features-title">
+  <p class="eyebrow">GUT ORGANISIERT</p>
+  <h2 id="features-title">Alles auf einer Liste.</h2>
+  <ul>
+    @for (feature of featureHighlights; track feature) {
+      <li><span aria-hidden="true">✓</span>{{ feature }}</li>
+    }
+  </ul>
+</section>

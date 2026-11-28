@@ -1,0 +1,6 @@
+{
+  "issuer": "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_LOCALDEV",
+  "clientId": "local-dev-client",
+  "apiBaseUrl": "http://127.0.0.1:3000",
+  "scope": "openid"
+}

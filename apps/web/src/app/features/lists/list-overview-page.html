@@ -1,0 +1,58 @@
+<section class="overview" aria-labelledby="overview-title">
+  <header class="overview-header">
+    <p class="eyebrow">DEINE EINKÄUFE</p>
+    <h1 id="overview-title">Meine Listen</h1>
+  </header>
+
+  <form class="create-form" #createForm (submit)="create($event, createForm)" aria-label="Neue Liste anlegen" novalidate>
+    <label class="field">
+      <span class="field-label">Neue Liste</span>
+      <input name="name" type="text" autocomplete="off" placeholder="z. B. Wocheneinkauf" [attr.maxlength]="maxNameLength" required [attr.aria-invalid]="createError() !== null" [attr.aria-describedby]="createError() ? 'create-error' : null" />
+    </label>
+    <button class="primary" type="submit" [disabled]="creating()">{{ creating() ? 'Wird angelegt …' : 'Anlegen' }}</button>
+    @if (createError(); as message) {
+      <p class="form-error" id="create-error" role="alert">{{ message }}</p>
+    }
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <p class="status" role="status">Listen werden geladen …</p>
+    }
+    @case ('error') {
+      <div class="state-card error" role="alert">
+        <h2>Listen konnten nicht geladen werden</h2>
+        <p>Bitte prüfe deine Verbindung und versuche es erneut.</p>
+        <button class="secondary" type="button" (click)="load()">Erneut versuchen</button>
+      </div>
+    }
+    @case ('ready') {
+      @if (lists().length === 0) {
+        <div class="state-card empty">
+          <h2>Noch keine Listen</h2>
+          <p>Lege oben deine erste Einkaufsliste an.</p>
+        </div>
+      } @else {
+        <ul class="list-grid" aria-label="Einkaufslisten">
+          @for (list of lists(); track list.id) {
+            <li>
+              <a class="list-card" [routerLink]="['/listen', list.id]">
+                <span class="list-name">{{ list.name }}</span>
+                <span class="badge" [class.household]="list.type === 'HOUSEHOLD'">{{ typeLabel(list.type) }}</span>
+                <span class="chevron" aria-hidden="true">→</span>
+              </a>
+            </li>
+          }
+        </ul>
+        @if (nextCursor() !== null) {
+          <div class="more">
+            <button class="secondary" type="button" (click)="loadMore()" [disabled]="loadingMore()">{{ loadingMore() ? 'Wird geladen …' : 'Weitere Listen laden' }}</button>
+            @if (loadMoreFailed()) {
+              <p class="form-error" role="alert">Weitere Listen konnten nicht geladen werden.</p>
+            }
+          </div>
+        }
+      }
+    }
+  }
+</section>

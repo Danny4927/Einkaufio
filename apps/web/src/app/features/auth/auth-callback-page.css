@@ -1,0 +1,4 @@
+:host { display: block; }
+.callback { display: grid; place-items: center; min-height: 50vh; padding: 48px 0; }
+.state-card { max-width: 460px; }
+.state-card h1 { margin: 0 0 8px; font-size: 1.3rem; }

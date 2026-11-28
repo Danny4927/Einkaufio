@@ -1,16 +1,27 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { RouterLink, RouterOutlet } from '@angular/router';
+import { AuthService } from './core/auth/auth.service';
 
 @Component({
   selector: 'einkaufio-root',
-  standalone: true,
+  imports: [RouterOutlet, RouterLink],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  readonly featureHighlights = [
-    'Listen gemeinsam bearbeiten',
-    'Änderungen synchron halten',
-    'Mit Familie und Freunden teilen',
-  ];
+  protected readonly auth = inject(AuthService);
+
+  constructor() {
+    // Runs before the router processes /auth/callback so the code exchange sees the URL.
+    void this.auth.initialize();
+  }
+
+  protected signIn(): void {
+    void this.auth.signIn();
+  }
+
+  protected signOut(): void {
+    void this.auth.signOut();
+  }
 }

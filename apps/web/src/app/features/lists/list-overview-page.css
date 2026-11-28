@@ -1,0 +1,27 @@
+:host { display: block; }
+.overview { display: grid; gap: 24px; padding: 40px 0 64px; }
+.overview-header h1 { margin: 0; font-size: clamp(2rem, 5vw, 2.6rem); letter-spacing: -.05em; }
+
+.create-form {
+  display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10px 12px;
+  padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface);
+}
+.create-form .form-error { grid-column: 1 / -1; }
+
+.list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.list-card {
+  display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 10px 12px; align-items: center;
+  min-height: 96px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface);
+  color: var(--ink); text-decoration: none; box-shadow: 0 10px 30px #263a2408;
+}
+.list-card:hover { border-color: #c8d0bf; }
+.list-name { grid-column: 1; font-size: 1.05rem; font-weight: 700; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.badge { grid-column: 1; grid-row: 2; justify-self: start; }
+.chevron { grid-column: 2; grid-row: 1 / span 2; color: var(--green); font-weight: 800; }
+
+.more { display: grid; justify-items: center; gap: 8px; }
+
+@media (max-width: 560px) {
+  .overview { padding-top: 28px; }
+  .create-form { grid-template-columns: 1fr; }
+}

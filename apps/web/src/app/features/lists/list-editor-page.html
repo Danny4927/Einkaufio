@@ -1,0 +1,135 @@
+<section class="editor" aria-labelledby="list-title">
+  <a class="back" routerLink="/listen"><span aria-hidden="true">←</span> Alle Listen</a>
+
+  @switch (store.state()) {
+    @case ('loading') {
+      <p class="status" role="status">Liste wird geladen …</p>
+    }
+    @case ('not-found') {
+      <div class="state-card" role="alert">
+        <h1 id="list-title">Liste nicht gefunden</h1>
+        <p>Diese Liste gibt es nicht (mehr) oder du hast keinen Zugriff darauf.</p>
+        <a class="secondary" routerLink="/listen">Zur Übersicht</a>
+      </div>
+    }
+    @case ('error') {
+      <div class="state-card error" role="alert">
+        <h1 id="list-title">Liste konnte nicht geladen werden</h1>
+        <p>Bitte prüfe deine Verbindung und versuche es erneut.</p>
+        <button class="secondary" type="button" (click)="retry()">Erneut versuchen</button>
+      </div>
+    }
+    @case ('ready') {
+      <header class="editor-header">
+        <div>
+          <p class="eyebrow">{{ store.list()?.type === 'HOUSEHOLD' ? 'HAUSHALTSLISTE' : 'PERSÖNLICHE LISTE' }}</p>
+          <h1 id="list-title">{{ store.list()?.name }}</h1>
+        </div>
+        <div class="header-status">
+          <p class="progress">{{ store.checkedCount() }} von {{ store.items().length }} erledigt</p>
+          <p class="sync-status" role="status">
+            @if (store.saving()) {
+              Wird gespeichert …
+            } @else if (store.syncProblem()) {
+              <span class="sync-problem">Synchronisierung gestört – neuer Versuch folgt</span>
+            } @else {
+              <span class="live-dot" aria-hidden="true"></span> Aktuell
+            }
+          </p>
+        </div>
+      </header>
+
+      @if (store.notice(); as notice) {
+        <div class="notice" [class.conflict]="notice.kind === 'conflict'" role="alert">
+          <p>{{ notice.text }}</p>
+          <button class="ghost" type="button" (click)="store.dismissNotice()">Schließen</button>
+        </div>
+      }
+
+      <form class="add-form" #addForm (submit)="add($event, addForm)" aria-label="Artikel hinzufügen" novalidate>
+        <label class="field name">
+          <span class="field-label">Artikel</span>
+          <input name="name" type="text" autocomplete="off" placeholder="z. B. Hafermilch" [attr.maxlength]="limits.name" required [attr.aria-invalid]="addError() !== null" />
+        </label>
+        <label class="field">
+          <span class="field-label">Menge</span>
+          <input name="quantity" type="text" autocomplete="off" placeholder="2" [attr.maxlength]="limits.quantity" />
+        </label>
+        <label class="field">
+          <span class="field-label">Einheit</span>
+          <input name="unit" type="text" autocomplete="off" placeholder="l" [attr.maxlength]="limits.unit" />
+        </label>
+        <button class="primary" type="submit">Hinzufügen</button>
+        @if (addError(); as message) {
+          <p class="form-error" role="alert">{{ message }}</p>
+        }
+      </form>
+
+      @if (store.items().length === 0) {
+        <div class="state-card empty">
+          <h2>Diese Liste ist noch leer</h2>
+          <p>Füge oben den ersten Artikel hinzu.</p>
+        </div>
+      } @else {
+        @if (store.checkedCount() === store.items().length) {
+          <div class="done-banner" role="status">
+            <span class="done-mark" aria-hidden="true">✓</span>
+            <p><strong>Alles erledigt.</strong> Jeder Artikel ist abgehakt.</p>
+          </div>
+        }
+        <ul class="items" aria-label="Artikel">
+          @for (item of store.items(); track item.id; let first = $first; let last = $last) {
+            <li class="item" [class.checked]="item.checked" [class.local]="isLocal(item)">
+              @if (editingId() === item.id) {
+                <form class="edit-form" #editForm (submit)="saveEdit($event, editForm, item.id)" [attr.aria-label]="'„' + item.name + '“ bearbeiten'" novalidate>
+                  <label class="field name">
+                    <span class="field-label">Artikel</span>
+                    <input name="name" type="text" autocomplete="off" [value]="item.name" [attr.maxlength]="limits.name" required />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Menge</span>
+                    <input name="quantity" type="text" autocomplete="off" [value]="item.quantity ?? ''" [attr.maxlength]="limits.quantity" />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Einheit</span>
+                    <input name="unit" type="text" autocomplete="off" [value]="item.unit ?? ''" [attr.maxlength]="limits.unit" />
+                  </label>
+                  <label class="field note">
+                    <span class="field-label">Notiz</span>
+                    <textarea name="note" [value]="item.note ?? ''" [attr.maxlength]="limits.note"></textarea>
+                  </label>
+                  @if (editError(); as message) {
+                    <p class="form-error" role="alert">{{ message }}</p>
+                  }
+                  <div class="edit-actions">
+                    <button class="ghost" type="button" (click)="cancelEdit()">Abbrechen</button>
+                    <button class="primary" type="submit">Speichern</button>
+                  </div>
+                </form>
+              } @else {
+                <label class="check">
+                  <input type="checkbox" [checked]="item.checked" [disabled]="isLocal(item)" (change)="toggle(item)" />
+                  <span class="item-text">
+                    <span class="item-name">{{ item.name }}</span>
+                    @if (item.note) {
+                      <span class="item-note">{{ item.note }}</span>
+                    }
+                  </span>
+                </label>
+                @if (amount(item); as itemAmount) {
+                  <span class="amount">{{ itemAmount }}</span>
+                }
+                <div class="item-actions">
+                  <button class="icon" type="button" [disabled]="first || !store.canMove(item.id, -1)" (click)="move(item, -1)" [attr.aria-label]="'„' + item.name + '“ nach oben verschieben'">↑</button>
+                  <button class="icon" type="button" [disabled]="last || !store.canMove(item.id, 1)" (click)="move(item, 1)" [attr.aria-label]="'„' + item.name + '“ nach unten verschieben'">↓</button>
+                  <button class="icon" type="button" [disabled]="isLocal(item)" (click)="startEdit(item)" [attr.aria-label]="'„' + item.name + '“ bearbeiten'">✎</button>
+                  <button class="icon delete" type="button" [disabled]="isLocal(item)" (click)="remove(item)" [attr.aria-label]="'„' + item.name + '“ löschen'">✕</button>
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+    }
+  }
+</section>

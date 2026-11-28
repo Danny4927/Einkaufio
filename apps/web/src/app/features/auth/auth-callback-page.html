@@ -1,0 +1,11 @@
+<section class="callback">
+  @if (failed()) {
+    <div class="state-card error" role="alert">
+      <h1>Anmeldung fehlgeschlagen</h1>
+      <p>Die Anmeldung konnte nicht abgeschlossen werden. Bitte versuche es erneut.</p>
+      <button class="primary" type="button" (click)="retry()">Erneut anmelden</button>
+    </div>
+  } @else {
+    <p class="status" role="status">Anmeldung wird abgeschlossen …</p>
+  }
+</section>
