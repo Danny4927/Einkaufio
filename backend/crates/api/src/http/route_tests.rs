@@ -19,6 +19,10 @@ use tower::ServiceExt;
 
 use super::*;
 
+mod account_routes;
+mod authorization_matrix;
+mod household_routes;
+
 const OWNER: &str = "owner";
 const CONTRIBUTOR: &str = "contributor";
 const STRANGER: &str = "stranger";
@@ -73,6 +77,7 @@ fn harness_with_limiter(limiter: TokenBucketRateLimiter) -> Harness {
         Arc::new(Sequence::default()),
         Arc::new(Sequence::default()),
         Arc::new(limiter),
+        test_household_services(),
     );
     let protected = protected_routes::<InMemoryRepository>()
         .route_layer(middleware::from_fn_with_state(
@@ -208,6 +213,7 @@ async fn list_mutation_routes_require_authentication() {
         Arc::new(Sequence::default()),
         Arc::new(Sequence::default()),
         Arc::new(TokenBucketRateLimiter::with_defaults()),
+        test_household_services(),
     )
     .with_authenticator(verifier);
     let app = router(state);
@@ -896,6 +902,7 @@ async fn throttling_fails_closed_when_the_limiter_is_unavailable() {
         Arc::new(Sequence::default()),
         Arc::new(Sequence::default()),
         Arc::new(BrokenLimiter),
+        test_household_services(),
     );
     let protected = protected_routes::<InMemoryRepository>()
         .route_layer(middleware::from_fn_with_state(

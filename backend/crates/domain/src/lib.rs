@@ -19,7 +19,8 @@ pub use household::{
 pub use identifiers::{HouseholdId, IdentifierError, InvitationId, ItemId, ListId, UserId};
 pub use invitation::{
     Invitation, InvitationError, InvitationLifetime, InvitationLimitError, InvitationMaxUses,
-    InvitationToken, InvitationTokenError, InvitationTokenHash, InvitationUseError, Timestamp,
+    InvitationRestoreError, InvitationToken, InvitationTokenError, InvitationTokenHash,
+    InvitationUseError, Timestamp,
 };
 pub use profile::{DisplayName, DisplayNameError, UserProfile};
 pub use shopping_item::{

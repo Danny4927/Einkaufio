@@ -14,6 +14,7 @@ This guide describes how to prepare a workstation, run the repository checks and
 | Terraform | 1.10.5 or newer | `make terraform-fmt`, `make terraform-validate` |
 | Node.js and npm | Node 24.15.0 (see `apps/web/.nvmrc`); npm pinned to 10.9.2 in CI | `make web-*`, `make openapi-lint` |
 | jq, ShellCheck | Optional locally; installed in CI | `make agent-config-check` |
+| DynamoDB Local | Docker image `amazon/dynamodb-local:3.3.2` (as in CI) or the AWS-provided JAR with Java 17+ | `make test-dynamodb` |
 | Checkov | Optional; used by `make terraform-scan` | `make terraform-scan` |
 
 `make web-e2e-setup` installs the Playwright Chromium browser without installing OS packages or requiring root. Playwright's system dependencies on Linux are not installed by that target; CI uses `npx playwright install --with-deps chromium`.
@@ -27,10 +28,11 @@ Run all commands from the repository root.
 | Command | What it does |
 |---|---|
 | `make fmt` | Checks Rust formatting (`cargo fmt --check`) |
-| `make lint` | Runs Clippy over the workspace with `-D warnings` |
+| `make lint` | Runs Clippy over the workspace with `-D warnings`, plus the adapters crate with the `dynamodb` feature |
 | `make test` / `make test-workspace` | Runs workspace tests |
 | `make test-domain` | Runs the domain crate tests |
 | `make test-application` | Runs the application crate tests |
+| `make test-dynamodb` | Runs the DynamoDB adapter unit tests, the shared contract suite and race tests against `DYNAMODB_ENDPOINT`; fails when the variable is unset |
 | `make architecture` | Runs architecture boundary unit tests and `scripts/check_architecture.py` |
 | `make deny` | Runs `cargo deny check` against `backend/Cargo.toml` using `backend/deny.toml` |
 | `make ci-backend` | Format, lint, workspace tests and architecture checks |
@@ -61,6 +63,21 @@ Web dependencies are locked in `apps/web/package-lock.json`. Install them with `
 | `make web-build` | Builds the production bundle |
 | `make web-e2e-setup` | Installs the Playwright Chromium browser |
 | `make web-e2e` | Runs Playwright end-to-end tests |
+
+## DynamoDB Local
+
+The DynamoDB adapter (ADR 019) is tested against DynamoDB Local. Every test creates its own table, so one in-memory instance can serve repeated runs.
+
+```bash
+# Docker (same image as CI)
+docker run --rm -p 8000:8000 amazon/dynamodb-local:3.3.2
+# or the JAR from AWS (requires Java), extracted into a directory of your choice
+java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -inMemory -port 8000
+
+DYNAMODB_ENDPOINT=http://localhost:8000 make test-dynamodb
+```
+
+The tests use static dummy credentials and never contact AWS. Do not point `DYNAMODB_ENDPOINT` at a shared or production table: the tests create tables.
 
 ## Environment configuration
 

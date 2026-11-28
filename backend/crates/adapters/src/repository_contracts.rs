@@ -2415,10 +2415,146 @@ pub async fn run_invitation_contract(
         .unwrap();
 }
 
+/// Runs the account-data scenarios (roadmap D2, ADR 018): profile deletion and removal of the
+/// invitations a principal created. Both are scoped to the principal's own records.
+pub async fn run_account_data_contract(
+    profiles: &impl ProfileRepository,
+    households: &impl HouseholdStore,
+) {
+    let anna = user("acct-anna");
+    let ben = user("acct-ben");
+    let name = |value: &str| DisplayName::try_new(value).unwrap();
+    assert_eq!(
+        profiles.delete_profile(&anna).await,
+        Err(RepositoryError::NotFound)
+    );
+    profiles
+        .create_profile(UserProfile::new(anna.clone(), name("Anna")))
+        .await
+        .expect("create anna");
+    profiles
+        .create_profile(UserProfile::new(ben.clone(), name("Ben")))
+        .await
+        .expect("create ben");
+    profiles.delete_profile(&anna).await.expect("delete anna");
+    assert_eq!(
+        profiles.get_profile(&anna).await,
+        Err(RepositoryError::NotFound)
+    );
+    assert_eq!(
+        profiles.delete_profile(&anna).await,
+        Err(RepositoryError::NotFound)
+    );
+    assert!(profiles.get_profile(&ben).await.is_ok());
+    // A deleted profile can be created again (a new sign-up with the same subject).
+    profiles
+        .create_profile(UserProfile::new(anna.clone(), name("Anna")))
+        .await
+        .expect("recreate anna");
+
+    // Anna creates an invitation, hands ownership to Ben, who creates another one.
+    let household = provision_household(households, "acct-h", "acct-anna", &["acct-ben"]).await;
+    households
+        .create_invitation(
+            &admin(&anna, HouseholdOperation::ManageInvitations),
+            invitation("acct-inv-anna", "acct-h", "acct-anna", "acct-inv-anna", 1),
+            at(NOW),
+        )
+        .await
+        .expect("anna invites");
+    households
+        .transfer_ownership(
+            &admin(&anna, HouseholdOperation::TransferOwnership),
+            household.id(),
+            household.version(),
+            &ben,
+        )
+        .await
+        .expect("transfer to ben");
+    households
+        .create_invitation(
+            &admin(&ben, HouseholdOperation::ManageInvitations),
+            invitation("acct-inv-ben", "acct-h", "acct-ben", "acct-inv-ben", 2),
+            at(NOW),
+        )
+        .await
+        .expect("ben invites");
+
+    households
+        .delete_invitations_created_by(&anna)
+        .await
+        .expect("delete anna's invitations");
+    households
+        .delete_invitations_created_by(&anna)
+        .await
+        .expect("idempotent");
+    let remaining: Vec<String> = households
+        .list_invitations(
+            &admin(&ben, HouseholdOperation::ManageInvitations),
+            household.id(),
+        )
+        .await
+        .expect("list")
+        .iter()
+        .map(|invitation| invitation.id().as_str().to_owned())
+        .collect();
+    assert_eq!(remaining, vec!["acct-inv-ben".to_owned()]);
+    assert_eq!(
+        households
+            .accept_invitation(&user("acct-guest"), &token_hash("acct-inv-anna"), at(NOW))
+            .await
+            .map(|_| ()),
+        Err(HouseholdRepositoryError::InvitationUnavailable)
+    );
+    households
+        .accept_invitation(&user("acct-guest"), &token_hash("acct-inv-ben"), at(NOW))
+        .await
+        .expect("ben's invitation stays valid");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::in_memory::InMemoryRepository;
+
+    #[tokio::test]
+    async fn in_memory_adapter_passes_account_data_contract() {
+        let repository = InMemoryRepository::new();
+        run_account_data_contract(&repository, &repository).await;
+    }
+
+    /// Implements only the required profile methods, so `delete_profile` uses the default.
+    struct LegacyProfiles;
+
+    impl ProfileRepository for LegacyProfiles {
+        async fn create_profile(&self, _: UserProfile) -> Result<(), RepositoryError> {
+            Err(RepositoryError::Unavailable)
+        }
+        async fn get_profile(&self, _: &UserId) -> Result<UserProfile, RepositoryError> {
+            Err(RepositoryError::Unavailable)
+        }
+        async fn update_profile(
+            &self,
+            _: &UserId,
+            _: AggregateVersion,
+            _: DisplayName,
+        ) -> Result<UserProfile, RepositoryError> {
+            Err(RepositoryError::Unavailable)
+        }
+    }
+
+    #[tokio::test]
+    async fn default_account_data_operations_are_fail_closed() {
+        let owner = user("owner");
+        assert_eq!(
+            LegacyProfiles.delete_profile(&owner).await,
+            Err(RepositoryError::Unavailable)
+        );
+        assert_eq!(
+            Unimplemented.delete_invitations_created_by(&owner).await,
+            Err(HouseholdRepositoryError::Unavailable)
+        );
+    }
 
     #[tokio::test]
     async fn in_memory_adapter_passes_list_contract() {

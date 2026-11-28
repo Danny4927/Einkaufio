@@ -161,6 +161,13 @@ pub enum InvitationError {
     ExpiryOverflow,
 }
 
+/// Persisted invitation state that violates the invitation invariants.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InvitationRestoreError {
+    /// More uses were recorded than the invitation allows.
+    UsedCountExceedsMaxUses,
+}
+
 /// An invitation to join a household.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invitation {
@@ -199,6 +206,36 @@ impl Invitation {
             max_uses,
             used_count: 0,
             revoked: false,
+        })
+    }
+
+    /// Reconstitutes an invitation from persisted state (persistence adapters only).
+    ///
+    /// Performs no business transition. Rejects state that violates the use-count invariant,
+    /// so corrupted records fail closed instead of granting extra uses.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore(
+        id: InvitationId,
+        household_id: HouseholdId,
+        created_by: UserId,
+        token_hash: InvitationTokenHash,
+        expires_at: Timestamp,
+        max_uses: InvitationMaxUses,
+        used_count: u32,
+        revoked: bool,
+    ) -> Result<Self, InvitationRestoreError> {
+        if used_count > max_uses.get() {
+            return Err(InvitationRestoreError::UsedCountExceedsMaxUses);
+        }
+        Ok(Self {
+            id,
+            household_id,
+            created_by,
+            token_hash,
+            expires_at,
+            max_uses,
+            used_count,
+            revoked,
         })
     }
 
@@ -374,6 +411,30 @@ mod tests {
                 InvitationMaxUses::DEFAULT,
             ),
             Err(InvitationError::ExpiryOverflow)
+        );
+    }
+
+    #[test]
+    fn restore_reconstitutes_use_state_and_rejects_impossible_counts() {
+        let restore = |used_count| {
+            Invitation::restore(
+                InvitationId::try_new("invite-1").unwrap(),
+                HouseholdId::try_new("household-1").unwrap(),
+                UserId::try_new("owner").unwrap(),
+                InvitationTokenHash::from_bytes([7; 32]),
+                Timestamp::from_unix_seconds(5_000),
+                InvitationMaxUses::try_new(2).unwrap(),
+                used_count,
+                true,
+            )
+        };
+        let restored = restore(2).unwrap();
+        assert_eq!(restored.used_count(), 2);
+        assert!(restored.is_revoked());
+        assert_eq!(restored.expires_at(), Timestamp::from_unix_seconds(5_000));
+        assert_eq!(
+            restore(3),
+            Err(InvitationRestoreError::UsedCountExceedsMaxUses)
         );
     }
 }

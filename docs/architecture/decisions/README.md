@@ -19,5 +19,8 @@
 | [015](015-list-access-model.md) | List access model (owner/household; explicit sharing in v1.x) | Accepted |
 | [016](016-per-principal-throttling.md) | Per-principal request throttling (best effort per Lambda instance) | Accepted |
 | [017](017-households-invitation-token-ports.md) | Households, membership lifecycle and invitation token ports | Accepted |
+| [018](018-household-http-invitation-urls-and-account-data.md) | Household HTTP routes, invitation URLs, account deletion and data export | Accepted |
+| [019](019-dynamodb-adapter-design.md) | DynamoDB adapter: item index in list metadata, optimistic transactions, counters, bounded sweeps | Accepted |
+| [020](020-web-client-auth-runtime-config-and-sync.md) | Web client: Cognito code + PKCE, runtime config, visible-list polling with optimistic UI | Accepted |
 
 ADRs record decisions and their trade-offs. Change accepted decisions through a superseding ADR rather than silently changing the architecture.

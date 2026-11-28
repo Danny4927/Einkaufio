@@ -249,6 +249,17 @@ pub trait InvitationRepository: Send + Sync {
     ) -> impl Future<Output = Result<HouseholdSummary, HouseholdRepositoryError>> + Send {
         async { Err(HouseholdRepositoryError::Unavailable) }
     }
+
+    /// Removes every invitation the principal created, in any household (account deletion,
+    /// roadmap D2). Scoped to the verified principal's own records, so it needs no household
+    /// permission; removed invitations can no longer be accepted. Idempotent: `Ok` also when
+    /// there is nothing to remove.
+    fn delete_invitations_created_by(
+        &self,
+        _principal: &UserId,
+    ) -> impl Future<Output = Result<(), HouseholdRepositoryError>> + Send {
+        async { Err(HouseholdRepositoryError::Unavailable) }
+    }
 }
 
 /// Failure of the platform's secure random source. Callers must fail closed.

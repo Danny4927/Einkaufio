@@ -1,6 +1,7 @@
 //! Shopping-item entity and value objects.
 
 use crate::identifiers::{ItemId, UserId};
+use crate::shopping_list::AggregateVersion;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ItemName(String);
@@ -100,6 +101,31 @@ impl ShoppingItem {
             checked: false,
             position,
             version: 1,
+            created_by,
+        }
+    }
+
+    /// Reconstitutes an item from persisted state (persistence adapters only).
+    ///
+    /// Performs no business transition. `version` is the persisted item version, which is
+    /// positive by construction (`AggregateVersion`).
+    pub fn restore(
+        id: ItemId,
+        details: ItemDetails,
+        checked: bool,
+        position: u32,
+        version: AggregateVersion,
+        created_by: UserId,
+    ) -> Self {
+        Self {
+            id,
+            name: details.name,
+            quantity: details.quantity,
+            unit: details.unit,
+            note: details.note,
+            checked,
+            position,
+            version: version.as_u64(),
             created_by,
         }
     }
@@ -374,5 +400,31 @@ mod tests {
         // No-op changes never need a new version, so they still succeed at the limit.
         assert_eq!(item.set_checked(false), Ok(false));
         assert_eq!(item.update_details(before.details()), Ok(false));
+    }
+
+    #[test]
+    fn restore_reconstitutes_check_state_position_and_version() {
+        let details = ItemDetails {
+            name: ItemName::try_new("Milch").unwrap(),
+            quantity: Some(ItemQuantity::try_new("2").unwrap()),
+            unit: Some(ItemUnit::try_new("l").unwrap()),
+            note: Some(ItemNote::try_new("Bio").unwrap()),
+        };
+        let mut restored = ShoppingItem::restore(
+            ItemId::try_new("item-1").unwrap(),
+            details.clone(),
+            true,
+            4,
+            AggregateVersion::try_new(9).unwrap(),
+            UserId::try_new("creator").unwrap(),
+        );
+        assert!(restored.checked());
+        assert_eq!(restored.position(), 4);
+        assert_eq!(restored.version(), 9);
+        assert_eq!(restored.details(), details);
+        assert_eq!(restored.created_by().as_str(), "creator");
+        // Restored items continue their version history.
+        assert_eq!(restored.set_checked(false), Ok(true));
+        assert_eq!(restored.version(), 10);
     }
 }

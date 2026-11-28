@@ -3,7 +3,7 @@ WEB_DIR := apps/web
 TERRAFORM_DIRS := $(shell find infra/terraform -type f -name '*.tf' -exec dirname {} \; | sort -u)
 PLAYWRIGHT_INSTALL ?= npx playwright install chromium
 
-.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace architecture deny terraform-fmt terraform-validate terraform-scan web-install web-lint web-test web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
+.PHONY: check verify ci-backend ci-web ci-terraform fmt lint test test-domain test-application test-workspace test-dynamodb architecture deny terraform-fmt terraform-validate terraform-scan web-install web-lint web-test web-build web-e2e web-e2e-setup agent-config-check yaml-lint openapi-lint ci-contracts
 
 check: fmt lint test-workspace architecture terraform-fmt yaml-lint
 verify: ci-backend ci-web ci-terraform ci-contracts agent-config-check
@@ -18,6 +18,7 @@ fmt:
 	cargo fmt --manifest-path backend/Cargo.toml --all -- --check
 lint:
 	cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
+	cargo clippy --manifest-path backend/Cargo.toml -p einkaufio-adapters --all-targets --features dynamodb,test-support -- -D warnings
 test: test-workspace
 test-workspace:
 	cargo test --manifest-path backend/Cargo.toml --workspace
@@ -25,6 +26,11 @@ test-domain:
 	cargo test --manifest-path backend/Cargo.toml -p einkaufio-domain
 test-application:
 	cargo test --manifest-path backend/Cargo.toml -p einkaufio-application
+# DynamoDB adapter unit tests plus the shared contract suite and race tests against DynamoDB
+# Local (ADR 019). Fails instead of skipping when DYNAMODB_ENDPOINT is unset.
+test-dynamodb:
+	@test -n "$$DYNAMODB_ENDPOINT" || { echo "DYNAMODB_ENDPOINT is not set; start DynamoDB Local (docs/local-development.md), e.g. DYNAMODB_ENDPOINT=http://localhost:8000" >&2; exit 1; }
+	cargo test --manifest-path backend/Cargo.toml -p einkaufio-adapters --features dynamodb,test-support
 architecture:
 	python3 -m unittest discover -s tests/architecture -p 'test_*.py'
 	python3 scripts/check_architecture.py

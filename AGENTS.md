@@ -20,6 +20,7 @@ Read this first. Keep it concise; detailed decisions and policies live in docs/.
 - `make check`: fast backend formatting, lint, tests and architecture checks plus Terraform formatting.
 - `make verify`: full local verification through the same Makefile targets invoked by CI.
 - `make test-domain`, `make test-application`, `make fmt`, `make lint`: focused feedback loops.
+- `make test-dynamodb`: DynamoDB adapter contracts against DynamoDB Local; requires `DYNAMODB_ENDPOINT` (docs/local-development.md).
 - `make web-e2e-setup`: install the Playwright browser without installing OS packages or requiring root.
 - `make ci-contracts`: strict yamllint for all YAML plus Redocly lint of the OpenAPI contract.
 - `make agent-config-check`: validate Claude settings and hook behavior; requires jq, Python and ShellCheck if installed.

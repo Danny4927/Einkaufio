@@ -4,7 +4,9 @@
 //! adapters, HTTP frameworks, AWS SDKs or database clients.
 
 pub mod create_personal_list;
+pub mod delete_account;
 pub mod delete_shopping_list;
+pub mod export_account_data;
 pub mod household_ports;
 pub mod households;
 pub mod invitations;
@@ -22,9 +24,11 @@ pub(crate) mod test_support;
 pub use create_personal_list::{
     CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError,
 };
+pub use delete_account::{AccountDataError, AccountDeletion, AccountRepositories, DeleteAccount};
 pub use delete_shopping_list::{
     DeleteShoppingList, DeleteShoppingListCommand, DeleteShoppingListError,
 };
+pub use export_account_data::{AccountDataExport, ExportAccountData, ExportedList};
 pub use household_ports::{
     Clock, HouseholdAccessRequest, HouseholdDetails, HouseholdIdGenerator, HouseholdRepository,
     HouseholdRepositoryError, HouseholdSummary, InvitationIdGenerator, InvitationRepository,
@@ -65,6 +69,8 @@ pub use shopping_items::{
     UpdateShoppingItemCommand,
 };
 
+/// Domain type that classifies invitation usability, re-exported for inbound adapters.
+pub use einkaufio_domain::InvitationUseError;
 /// Domain types returned by item, sync and profile use cases, re-exported for inbound adapters.
 pub use einkaufio_domain::{
     AggregateVersion, DisplayName, ItemDetails, ItemId, ItemOrder, ShoppingItem, UserProfile,

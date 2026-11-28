@@ -117,6 +117,24 @@ impl ShoppingList {
         }
     }
 
+    /// Reconstitutes a list from persisted state (persistence adapters only).
+    ///
+    /// This performs no business transition: it neither validates history nor advances the
+    /// version. All values are already validated types.
+    pub fn restore(
+        id: ListId,
+        owner: ListOwner,
+        name: ListName,
+        version: AggregateVersion,
+    ) -> Self {
+        Self {
+            id,
+            owner,
+            name,
+            version,
+        }
+    }
+
     /// Advances the aggregate version for an item mutation in this list.
     ///
     /// The adapter must call this within the same atomic operation as the item write.
@@ -329,5 +347,24 @@ mod tests {
         );
         assert_eq!(list.name().as_str(), "Einkauf");
         assert_eq!(list.version(), u64::MAX);
+    }
+
+    #[test]
+    fn restore_reconstitutes_persisted_state_without_transition() {
+        use super::{ListOwner, ShoppingList};
+        use crate::identifiers::{HouseholdId, ListId};
+        let restored = ShoppingList::restore(
+            ListId::try_new("list-1").unwrap(),
+            ListOwner::Household(HouseholdId::try_new("household-1").unwrap()),
+            ListName::try_new("WG").unwrap(),
+            AggregateVersion::try_new(7).unwrap(),
+        );
+        assert_eq!(restored.version(), 7);
+        assert_eq!(restored.name().as_str(), "WG");
+        assert_eq!(
+            restored.household_id().map(HouseholdId::as_str),
+            Some("household-1")
+        );
+        assert!(restored.personal_owner().is_none());
     }
 }

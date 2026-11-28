@@ -84,6 +84,40 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [Profile]
+      summary: Delete the caller's account data (GDPR erasure, ADR 018)
+      description: |
+        Deletes the profile, personal lists with items, memberships, invitations created by the
+        caller and households the caller owns alone. If the caller owns a household with other
+        active members, nothing is deleted and the response is 409
+        `owner_must_transfer_ownership`. Items the caller added to household lists stay with the
+        household. Idempotent; repeat after 409 `version_conflict` or 503. The Cognito user is
+        deleted separately by the client.
+      responses:
+        '204': { description: Account data deleted }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/me/export:
+    get:
+      tags: [Profile]
+      summary: Export the caller's personal data as JSON (GDPR access/portability, ADR 018)
+      responses:
+        '200':
+          description: Export document (download)
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountExport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists:
     get:
       tags: [Lists]
@@ -309,10 +343,10 @@ paths:
   /api/households:
     get:
       tags: [Households]
-      summary: List households for current user
+      summary: List households in which the caller is an active member
       responses:
         '200':
-          description: Households
+          description: Households with the caller's role
           content:
             application/json:
               schema:
@@ -322,9 +356,106 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/HouseholdSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     post:
       tags: [Households]
-      summary: Create household
+      summary: Create a household; the caller becomes its owner
+      description: At most 5 households per user (owned or joined).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { $ref: '#/components/schemas/HouseholdName' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Created household
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseholdSummary' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+    get:
+      tags: [Households]
+      summary: Get the household and its active members (members only)
+      description: Callers who are not active members receive 404 (no existence leak).
+      responses:
+        '200':
+          description: Household
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Household' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    patch:
+      tags: [Households]
+      summary: Rename the household (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, expectedVersion]
+              properties:
+                name: { $ref: '#/components/schemas/HouseholdName' }
+                expectedVersion: { type: integer, minimum: 1 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Renamed household
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseholdSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [Households]
+      summary: Delete the household with its lists, items, memberships and invitations (owner only)
+      description: |
+        When the response is sent, the household and everything it owns are inaccessible to
+        everyone; storage cleanup may continue in bounded batches (ADR 017).
+      parameters:
+        - $ref: '#/components/parameters/ExpectedVersion'
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}/lists:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+    post:
+      tags: [Households]
+      summary: Create a household-owned list (any active member)
+      description: |
+        At most 20 lists per household. Household lists appear in `GET /api/lists` for every
+        active member; the owner administers them, members contribute (ADR 015).
       requestBody:
         required: true
         content:
@@ -337,101 +468,119 @@ paths:
               additionalProperties: false
       responses:
         '201':
-          description: Created household
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/HouseholdSummary' }
-  /api/households/{householdId}:
-    parameters:
-      - name: householdId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Households]
-      summary: Get household and member summaries
-      responses:
-        '200':
-          description: Household
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Household' }
-    patch:
-      tags: [Households]
-      summary: Rename household (owner only)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, expectedVersion]
-              properties:
-                name: { type: string, minLength: 1, maxLength: 120 }
-                expectedVersion: { type: integer, minimum: 1 }
-      responses:
-        '200': { description: Updated }
-        '409': { $ref: '#/components/responses/Conflict' }
-    delete:
-      tags: [Households]
-      summary: Begin household deletion (owner only; cascade is bounded/backgrounded)
-      responses:
-        '202': { description: Deletion accepted }
-  /api/households/{householdId}/lists:
-    parameters:
-      - name: householdId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Households]
-      summary: List household lists
-      responses:
-        '200':
-          description: Lists
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ListPage' }
-    post:
-      tags: [Households]
-      summary: Create household-owned list
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name]
-              properties:
-                name: { type: string, minLength: 1, maxLength: 120 }
-      responses:
-        '201':
           description: Created list
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ShoppingListSummary' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}/members:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+    get:
+      tags: [Households]
+      summary: List the active members (members only)
+      responses:
+        '200':
+          description: Members ordered by user id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/HouseholdMember' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/households/{householdId}/members/{userId}:
     parameters:
-      - name: householdId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/HouseholdId'
       - name: userId
         in: path
         required: true
-        schema: { type: string }
+        schema: { type: string, minLength: 1, maxLength: 128 }
     delete:
       tags: [Households]
-      summary: Remove a member or leave; owner transfer required for current owner
+      summary: Remove another member (owner only)
+      description: |
+        Removing the owner is rejected with `owner_must_transfer_ownership`; a user who is not
+        an active member yields 404. Members leave with `POST .../leave`.
+      parameters:
+        - $ref: '#/components/parameters/ExpectedVersion'
       responses:
-        '204': { description: Membership removed }
+        '200':
+          description: Household after the removal (new version)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseholdSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}/leave:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+    post:
+      tags: [Households]
+      summary: Leave the household (any member except the owner)
+      description: The owner receives `owner_must_transfer_ownership` and must transfer or delete first.
+      responses:
+        '204': { description: Membership ended; access to household lists ends with it }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}/transfer-ownership:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+    post:
+      tags: [Households]
+      summary: Make an active member the owner (owner only); the caller stays a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newOwnerId, expectedVersion]
+              properties:
+                newOwnerId: { type: string, minLength: 1, maxLength: 128 }
+                expectedVersion: { type: integer, minimum: 1 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Household after the transfer, with the caller's new role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseholdSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists/{listId}/invites:
     parameters:
       - $ref: '#/components/parameters/ListId'
     post:
       tags: [Invitations]
-      summary: Create invitation to personal list (deferred to v1.x, ADR 015)
+      summary: Create invitation to personal list (deferred to v1.x, ADR 015; not implemented)
+      x-deferred: v1.x
       requestBody:
         required: true
         content:
@@ -445,13 +594,33 @@ paths:
               schema: { $ref: '#/components/schemas/CreatedInvite' }
   /api/households/{householdId}/invites:
     parameters:
-      - name: householdId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/HouseholdId'
+    get:
+      tags: [Invitations]
+      summary: List the household's invitations (owner only); never includes tokens
+      responses:
+        '200':
+          description: Invitations ordered by id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invite' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
     post:
       tags: [Invitations]
-      summary: Create household invitation
+      summary: Create a household invitation (owner only)
+      description: |
+        At most 5 valid invitations per household. The raw token is returned once and never
+        stored; `inviteUrl` carries it in the URL fragment (ADR 018).
       requestBody:
         required: true
         content:
@@ -460,13 +629,44 @@ paths:
       responses:
         '201':
           description: Raw token returned once
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CreatedInvite' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/households/{householdId}/invites/{inviteId}:
+    parameters:
+      - $ref: '#/components/parameters/HouseholdId'
+      - name: inviteId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Invitations]
+      summary: Revoke an invitation (owner only); revoking twice is a no-op
+      responses:
+        '204': { description: Revoked }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/invites/accept:
     post:
       tags: [Invitations]
-      summary: Accept invitation as authenticated user
+      summary: Accept an invitation as the authenticated caller
+      description: |
+        The token is accepted only in the JSON body, never in a path or query string. Unknown,
+        malformed, revoked, expired and used-up tokens all receive the same 410 response.
       requestBody:
         required: true
         content:
@@ -475,22 +675,20 @@ paths:
               type: object
               required: [token]
               properties:
-                token: { type: string, minLength: 32, maxLength: 512 }
+                token: { type: string, minLength: 43, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' }
               additionalProperties: false
       responses:
-        '200': { description: Accepted or already a member }
-        '410': { description: 'Expired, revoked or exhausted invitation' }
-  /api/invites/{inviteId}:
-    parameters:
-      - name: inviteId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    delete:
-      tags: [Invitations]
-      summary: Revoke invitation (creator or resource owner)
-      responses:
-        '204': { description: Revoked }
+        '200':
+          description: Joined; the household with the caller's role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HouseholdSummary' }
+        '409': { $ref: '#/components/responses/RuleConflict' }
+        '410': { $ref: '#/components/responses/InvitationUnavailable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/lists/{listId}/sync:
     parameters:
       - $ref: '#/components/parameters/ListId'
@@ -522,6 +720,11 @@ components:
       bearerFormat: JWT
       description: Cognito access token, not an ID token.
   parameters:
+    HouseholdId:
+      name: householdId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     ListId:
       name: listId
       in: path
@@ -567,15 +770,16 @@ components:
         version: { type: integer, minimum: 1 }
     ShoppingListSummary:
       type: object
-      required: [id, name, type, role, version]
+      required: [id, name, type, version]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         type: { type: string, enum: [PERSONAL, HOUSEHOLD] }
-        role: { type: string, enum: [OWNER, MEMBER] }
-        householdId: { type: string, format: uuid }
+        householdId:
+          type: string
+          format: uuid
+          description: Present exactly for household lists.
         version: { type: integer, minimum: 1 }
-        updatedAt: { type: string, format: date-time }
     ShoppingList:
       allOf:
         - $ref: '#/components/schemas/ShoppingListSummary'
@@ -638,28 +842,34 @@ components:
         unit: { type: string, maxLength: 40 }
         note: { type: string, maxLength: 500 }
       additionalProperties: false
+    HouseholdName: { type: string, minLength: 1, maxLength: 80 }
+    HouseholdRole: { type: string, enum: [OWNER, MEMBER] }
     HouseholdSummary:
       type: object
-      required: [id, name, role]
+      required: [id, name, role, version]
       properties:
         id: { type: string, format: uuid }
-        name: { type: string }
-        role: { type: string, enum: [OWNER, MEMBER] }
-        memberCount: { type: integer, minimum: 1 }
+        name: { $ref: '#/components/schemas/HouseholdName' }
+        role:
+          allOf:
+            - $ref: '#/components/schemas/HouseholdRole'
+          description: The caller's role.
+        version: { type: integer, minimum: 1 }
+    HouseholdMember:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string }
+        role: { $ref: '#/components/schemas/HouseholdRole' }
     Household:
       allOf:
         - $ref: '#/components/schemas/HouseholdSummary'
         - type: object
+          required: [members]
           properties:
             members:
               type: array
-              items:
-                type: object
-                required: [userId, role]
-                properties:
-                  userId: { type: string }
-                  displayName: { type: string }
-                  role: { type: string, enum: [OWNER, MEMBER] }
+              items: { $ref: '#/components/schemas/HouseholdMember' }
     ListPage:
       type: object
       required: [items]
@@ -676,11 +886,61 @@ components:
       additionalProperties: false
     CreatedInvite:
       type: object
-      required: [inviteId, inviteUrl, expiresAt]
+      required: [inviteId, token, inviteUrl, expiresAt, maxUses]
       properties:
         inviteId: { type: string, format: uuid }
-        inviteUrl: { type: string, format: uri }
+        token:
+          type: string
+          minLength: 43
+          description: Bearer secret (256 bits, base64url). Shown once; never stored or logged.
+        inviteUrl:
+          type: string
+          format: uri
+          description: '`{PUBLIC_APP_BASE_URL}/invite#token={token}`; the token is in the fragment.'
         expiresAt: { type: string, format: date-time }
+        maxUses: { type: integer, minimum: 1, maximum: 10 }
+    Invite:
+      type: object
+      required: [inviteId, createdBy, expiresAt, maxUses, usedCount, status]
+      properties:
+        inviteId: { type: string, format: uuid }
+        createdBy: { type: string }
+        expiresAt: { type: string, format: date-time }
+        maxUses: { type: integer, minimum: 1, maximum: 10 }
+        usedCount: { type: integer, minimum: 0 }
+        status: { type: string, enum: [ACTIVE, REVOKED, EXPIRED, USED_UP] }
+    ExportedItem:
+      allOf:
+        - $ref: '#/components/schemas/ShoppingItem'
+        - type: object
+          required: [createdBy]
+          properties:
+            createdBy: { type: string }
+    AccountExport:
+      type: object
+      required: [formatVersion, exportedAt, userId, profile, households, lists]
+      properties:
+        formatVersion: { type: integer, const: 1 }
+        exportedAt: { type: string, format: date-time }
+        userId: { type: string }
+        profile:
+          oneOf:
+            - $ref: '#/components/schemas/UserProfile'
+            - type: 'null'
+        households:
+          type: array
+          items: { $ref: '#/components/schemas/HouseholdSummary' }
+        lists:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ShoppingListSummary'
+              - type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExportedItem' }
     SyncResponse:
       oneOf:
         - type: object
@@ -733,6 +993,21 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     BadRequest:
       description: Invalid input (validation, query parameters or unsupported combination)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RuleConflict:
+      description: |
+        Stale `expectedVersion` (`version_conflict`) or a business rule: `household_limit_reached`,
+        `member_limit_reached`, `list_limit_reached`, `invitation_limit_reached`,
+        `already_member` or `owner_must_transfer_ownership`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvitationUnavailable:
+      description: |
+        `invitation_unavailable`: the token is unknown, malformed, revoked, expired or used up.
+        The cases are deliberately indistinguishable.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

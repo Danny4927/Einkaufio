@@ -373,6 +373,15 @@ pub trait ProfileRepository: Send + Sync {
         expected_version: AggregateVersion,
         display_name: DisplayName,
     ) -> impl Future<Output = Result<UserProfile, RepositoryError>> + Send;
+
+    /// Deletes the principal's profile (account deletion, roadmap D2); `NotFound` if none
+    /// exists. The fail-closed default keeps adapters safe until they implement it.
+    fn delete_profile(
+        &self,
+        _principal: &UserId,
+    ) -> impl Future<Output = Result<(), RepositoryError>> + Send {
+        async { Err(RepositoryError::Unavailable) }
+    }
 }
 
 /// Generates list identifiers. Synchronous: generation must not perform I/O.

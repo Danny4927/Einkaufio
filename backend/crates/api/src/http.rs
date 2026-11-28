@@ -1,4 +1,5 @@
-//! HTTP transport for shopping lists, items, sync and the caller's profile.
+//! HTTP transport for shopping lists, items, sync, the caller's profile and account data,
+//! households and invitations.
 
 use std::sync::Arc;
 
@@ -9,35 +10,54 @@ use axum::{
     http::{StatusCode, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, put},
+    routing::{delete, get, patch, post, put},
 };
 use einkaufio_application::{
-    AddShoppingItem, AddShoppingItemCommand, AggregateVersion, CreatePersonalList,
-    CreatePersonalListCommand, CreatePersonalListError, CreateProfile, DeleteShoppingItem,
-    DeleteShoppingItemCommand, DeleteShoppingList, DeleteShoppingListCommand,
-    DeleteShoppingListError, GetProfile, ItemIdGenerator, ListIdGenerator, ListQueryError,
-    ListSync, Page, PageAccessibleLists, PageParameters, PageShoppingItems, ProfileError,
-    ProfileRepository, RateLimitDecision, RateLimiter, RenameShoppingList,
-    RenameShoppingListCommand, RenameShoppingListError, ReorderShoppingItems,
-    ReorderShoppingItemsCommand, RepositoryError, SetShoppingItemChecked,
-    SetShoppingItemCheckedCommand, ShoppingItem, ShoppingItemError, ShoppingItemRepository,
-    ShoppingList, ShoppingListRepository, SyncShoppingList, UpdateProfile, UpdateShoppingItem,
-    UpdateShoppingItemCommand, UserId, UserProfile,
+    AccountRepositories, AddShoppingItem, AddShoppingItemCommand, AggregateVersion, Clock,
+    CreatePersonalList, CreatePersonalListCommand, CreatePersonalListError, CreateProfile,
+    DeleteShoppingItem, DeleteShoppingItemCommand, DeleteShoppingList, DeleteShoppingListCommand,
+    DeleteShoppingListError, GetProfile, HouseholdIdGenerator, InvitationIdGenerator,
+    InvitationTokenGenerator, InvitationTokenHasher, ItemIdGenerator, ListIdGenerator, ListOwner,
+    ListQueryError, ListSync, Page, PageAccessibleLists, PageParameters, PageShoppingItems,
+    ProfileError, RateLimitDecision, RateLimiter, RenameShoppingList, RenameShoppingListCommand,
+    RenameShoppingListError, ReorderShoppingItems, ReorderShoppingItemsCommand, RepositoryError,
+    SetShoppingItemChecked, SetShoppingItemCheckedCommand, ShoppingItem, ShoppingItemError,
+    ShoppingList, SyncShoppingList, UpdateProfile, UpdateShoppingItem, UpdateShoppingItemCommand,
+    UserId, UserProfile,
 };
 use serde::{Deserialize, Serialize};
+
+mod account;
+mod households;
+mod invitation_url;
+mod timestamps;
+
+pub use invitation_url::{
+    INVITATION_PATH, InvitationBaseUrl, InvitationBaseUrlError, PUBLIC_APP_BASE_URL_ENV,
+};
 
 /// Maximum accepted request body size. Larger bodies are rejected with 413 before parsing.
 pub const MAX_REQUEST_BODY_BYTES: usize = 16 * 1024;
 
-/// Repository ports the HTTP adapter needs, satisfied by one persistence adapter.
-pub trait Repositories:
-    ShoppingListRepository + ShoppingItemRepository + ProfileRepository + 'static
-{
-}
+/// Repository ports the HTTP adapter needs, satisfied by one persistence adapter: lists,
+/// items, profiles, households and invitations.
+pub trait Repositories: AccountRepositories + 'static {}
 
-impl<T> Repositories for T where
-    T: ShoppingListRepository + ShoppingItemRepository + ProfileRepository + 'static
-{
+impl<T> Repositories for T where T: AccountRepositories + 'static {}
+
+/// Collaborators of the household and invitation routes (ADR 017, ADR 018).
+///
+/// The production implementations live in the adapters crate
+/// (`SecureInvitationTokenGenerator`, `Sha256InvitationTokenHasher`, `SystemClock`); the
+/// composition root wires them together with the configured public base URL.
+pub struct HouseholdServices {
+    pub household_ids: Arc<dyn HouseholdIdGenerator>,
+    pub invitation_ids: Arc<dyn InvitationIdGenerator>,
+    pub tokens: Arc<dyn InvitationTokenGenerator>,
+    pub hasher: Arc<dyn InvitationTokenHasher>,
+    pub clock: Arc<dyn Clock>,
+    /// Public HTTPS base URL of the web client; invitation URLs are built from it.
+    pub invitation_base_url: InvitationBaseUrl,
 }
 
 /// Shared handler state, generic over the persistence adapter.
@@ -49,6 +69,7 @@ pub struct ApiState<R> {
     list_ids: Arc<dyn ListIdGenerator>,
     item_ids: Arc<dyn ItemIdGenerator>,
     rate_limiter: Arc<dyn RateLimiter>,
+    households: Arc<HouseholdServices>,
     verifier: Option<Arc<CognitoTokenVerifier>>,
 }
 
@@ -59,6 +80,7 @@ impl<R> Clone for ApiState<R> {
             list_ids: Arc::clone(&self.list_ids),
             item_ids: Arc::clone(&self.item_ids),
             rate_limiter: Arc::clone(&self.rate_limiter),
+            households: Arc::clone(&self.households),
             verifier: self.verifier.clone(),
         }
     }
@@ -70,12 +92,14 @@ impl<R: Repositories> ApiState<R> {
         list_ids: Arc<dyn ListIdGenerator>,
         item_ids: Arc<dyn ItemIdGenerator>,
         rate_limiter: Arc<dyn RateLimiter>,
+        households: HouseholdServices,
     ) -> Self {
         Self {
             repositories,
             list_ids,
             item_ids,
             rate_limiter,
+            households: Arc::new(households),
             verifier: None,
         }
     }
@@ -86,15 +110,22 @@ impl<R: Repositories> ApiState<R> {
     }
 
     /// Build an authenticated API state from trusted runtime environment variables.
+    ///
+    /// The invitation base URL is part of `households`; the composition root reads it with
+    /// [`InvitationBaseUrl::from_env`] and aborts startup on error, like for Cognito.
     pub fn from_cognito_env(
         repositories: Arc<R>,
         list_ids: Arc<dyn ListIdGenerator>,
         item_ids: Arc<dyn ItemIdGenerator>,
         rate_limiter: Arc<dyn RateLimiter>,
+        households: HouseholdServices,
     ) -> Result<Self, AuthError> {
         let config = crate::auth::CognitoConfig::from_env()?;
         let verifier = CognitoTokenVerifier::new(config)?;
-        Ok(Self::new(repositories, list_ids, item_ids, rate_limiter).with_authenticator(verifier))
+        Ok(
+            Self::new(repositories, list_ids, item_ids, rate_limiter, households)
+                .with_authenticator(verifier),
+        )
     }
 }
 
@@ -136,7 +167,52 @@ fn protected_routes<R: Repositories>() -> Router<ApiState<R>> {
         )
         .route("/lists/{list_id}/item-order", put(reorder_items::<R>))
         .route("/lists/{list_id}/sync", get(sync_list::<R>))
-        .route("/me", get(get_profile::<R>).put(put_profile::<R>))
+        .route(
+            "/me",
+            get(get_profile::<R>)
+                .put(put_profile::<R>)
+                .delete(account::delete_account::<R>),
+        )
+        .route("/me/export", get(account::export_account::<R>))
+        .route(
+            "/households",
+            get(households::list_households::<R>).post(households::create_household::<R>),
+        )
+        .route(
+            "/households/{household_id}",
+            get(households::get_household::<R>)
+                .patch(households::rename_household::<R>)
+                .delete(households::delete_household::<R>),
+        )
+        .route(
+            "/households/{household_id}/lists",
+            post(households::create_household_list::<R>),
+        )
+        .route(
+            "/households/{household_id}/members",
+            get(households::list_members::<R>),
+        )
+        .route(
+            "/households/{household_id}/members/{user_id}",
+            delete(households::remove_member::<R>),
+        )
+        .route(
+            "/households/{household_id}/leave",
+            post(households::leave_household::<R>),
+        )
+        .route(
+            "/households/{household_id}/transfer-ownership",
+            post(households::transfer_ownership::<R>),
+        )
+        .route(
+            "/households/{household_id}/invites",
+            get(households::list_invitations::<R>).post(households::create_invitation::<R>),
+        )
+        .route(
+            "/households/{household_id}/invites/{invite_id}",
+            delete(households::revoke_invitation::<R>),
+        )
+        .route("/invites/accept", post(households::accept_invitation::<R>))
 }
 
 fn build_router<R: Repositories>(state: ApiState<R>, protected: Router<ApiState<R>>) -> Router {
@@ -330,14 +406,24 @@ struct PutProfileRequest {
 struct ListResponse {
     id: String,
     name: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    household_id: Option<String>,
     version: u64,
 }
 
 impl From<&ShoppingList> for ListResponse {
     fn from(list: &ShoppingList) -> Self {
+        let (kind, household_id) = match list.owner() {
+            ListOwner::Personal(_) => ("PERSONAL", None),
+            ListOwner::Household(id) => ("HOUSEHOLD", Some(id.as_str().to_owned())),
+        };
         Self {
             id: list.id().as_str().to_owned(),
             name: list.name().as_str().to_owned(),
+            kind,
+            household_id,
             version: list.version(),
         }
     }
@@ -745,7 +831,17 @@ enum ApiError {
     NotFound,
     Conflict,
     ItemLimitReached,
-    RateLimited { retry_after_seconds: u64 },
+    HouseholdLimitReached,
+    MemberLimitReached,
+    ListLimitReached,
+    InvitationLimitReached,
+    AlreadyMember,
+    OwnerMustTransferOwnership,
+    /// Unknown, malformed, revoked, expired or used-up invitation token: one answer for all.
+    InvitationUnavailable,
+    RateLimited {
+        retry_after_seconds: u64,
+    },
     Unavailable,
     Internal,
 }
@@ -900,6 +996,41 @@ impl IntoResponse for ApiError {
                 "item_limit_reached",
                 "The list has reached its item limit",
             ),
+            Self::HouseholdLimitReached => (
+                StatusCode::CONFLICT,
+                "household_limit_reached",
+                "The user has reached the household limit",
+            ),
+            Self::MemberLimitReached => (
+                StatusCode::CONFLICT,
+                "member_limit_reached",
+                "The household has reached its member limit",
+            ),
+            Self::ListLimitReached => (
+                StatusCode::CONFLICT,
+                "list_limit_reached",
+                "The household has reached its list limit",
+            ),
+            Self::InvitationLimitReached => (
+                StatusCode::CONFLICT,
+                "invitation_limit_reached",
+                "The household has reached its limit of valid invitations",
+            ),
+            Self::AlreadyMember => (
+                StatusCode::CONFLICT,
+                "already_member",
+                "The caller is already a member of the household",
+            ),
+            Self::OwnerMustTransferOwnership => (
+                StatusCode::CONFLICT,
+                "owner_must_transfer_ownership",
+                "The household owner must transfer ownership or delete the household first",
+            ),
+            Self::InvitationUnavailable => (
+                StatusCode::GONE,
+                "invitation_unavailable",
+                "The invitation is no longer valid",
+            ),
             Self::RateLimited { .. } => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
@@ -932,6 +1063,43 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Deterministic household collaborators for tests; tokens still come from the OS CSPRNG.
+#[cfg(test)]
+fn test_household_services() -> HouseholdServices {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Default)]
+    struct Counter(AtomicU64);
+
+    impl Counter {
+        fn next(&self, prefix: &str) -> String {
+            format!("{prefix}-{}", self.0.fetch_add(1, Ordering::SeqCst) + 1)
+        }
+    }
+    impl HouseholdIdGenerator for Counter {
+        fn generate(&self) -> String {
+            self.next("household")
+        }
+    }
+    impl InvitationIdGenerator for Counter {
+        fn generate(&self) -> String {
+            self.next("invite")
+        }
+    }
+
+    HouseholdServices {
+        household_ids: Arc::new(Counter::default()),
+        invitation_ids: Arc::new(Counter::default()),
+        tokens: Arc::new(
+            einkaufio_adapters::invitation_tokens::SecureInvitationTokenGenerator::new(),
+        ),
+        hasher: Arc::new(einkaufio_adapters::invitation_tokens::Sha256InvitationTokenHasher),
+        clock: Arc::new(einkaufio_adapters::invitation_tokens::SystemClock),
+        invitation_base_url: InvitationBaseUrl::try_new("https://app.example.test")
+            .expect("valid test base URL"),
+    }
+}
+
 #[cfg(test)]
 mod route_tests;
 
@@ -943,6 +1111,10 @@ mod tests {
     use axum::{
         body::{Body, to_bytes},
         http::{Method, Request},
+    };
+    use einkaufio_application::{
+        HouseholdRepository, InvitationRepository, ProfileRepository, ShoppingItemRepository,
+        ShoppingListRepository,
     };
     use tower::ServiceExt;
 
@@ -979,6 +1151,8 @@ mod tests {
                     Err(RepositoryError::Unavailable)
                 }
             }
+            impl HouseholdRepository for $type {}
+            impl InvitationRepository for $type {}
             impl ProfileRepository for $type {
                 async fn create_profile(&self, _: UserProfile) -> Result<(), RepositoryError> {
                     Err(RepositoryError::Unavailable)
@@ -1016,6 +1190,7 @@ mod tests {
             Arc::new(TestIds),
             Arc::new(TestItemIds),
             Arc::new(einkaufio_adapters::token_bucket::TokenBucketRateLimiter::with_defaults()),
+            test_household_services(),
         )
     }
 

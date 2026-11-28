@@ -6,12 +6,27 @@ publish = false
 
 [features]
 test-support = []
+# DynamoDB single-table adapter (ADR 019). Off by default so that pure workspace builds and
+# the in-memory contract suite do not compile the AWS SDK.
+dynamodb = ["dep:aws-sdk-dynamodb", "dep:aws-smithy-http-client", "dep:tokio"]
 
 [dependencies]
 einkaufio-application = { path = "../application" }
 einkaufio-domain = { path = "../domain" }
 # CSPRNG and SHA-256 for invitation tokens (ADR 017); already in the graph via rustls.
 ring = "0.17"
+# No default features: the default HTTPS client pulls aws-lc (C toolchain, extra licenses) and
+# the legacy feature pulls hyper 0.14/rustls 0.21. The adapter builds a rustls 0.23 + ring
+# client instead (`dynamodb::https_client`), reusing crates already in the graph.
+aws-sdk-dynamodb = { version = "1.141.0", default-features = false, features = ["rt-tokio"], optional = true }
+aws-smithy-http-client = { version = "1.5.3", default-features = false, features = ["rustls-ring", "rt-tokio"], optional = true }
+# Timer for bounded retry back-off in the DynamoDB adapter (already in the graph).
+tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+
+[[test]]
+name = "dynamodb_contracts"
+path = "tests/dynamodb_contracts.rs"
+required-features = ["dynamodb", "test-support"]

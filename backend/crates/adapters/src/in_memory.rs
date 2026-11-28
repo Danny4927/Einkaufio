@@ -619,6 +619,14 @@ impl ProfileRepository for InMemoryRepository {
             .map_err(|_| RepositoryError::VersionExhausted)?;
         Ok(profile.clone())
     }
+
+    async fn delete_profile(&self, principal: &UserId) -> Result<(), RepositoryError> {
+        self.state()?
+            .profiles
+            .remove(principal)
+            .map(|_| ())
+            .ok_or(RepositoryError::NotFound)
+    }
 }
 
 fn household_version_error(
@@ -929,6 +937,16 @@ impl InvitationRepository for InMemoryRepository {
             household,
             role: HouseholdRole::Member,
         })
+    }
+
+    async fn delete_invitations_created_by(
+        &self,
+        principal: &UserId,
+    ) -> Result<(), HouseholdRepositoryError> {
+        self.household_state()?
+            .invitations
+            .retain(|_, invitation| invitation.created_by() != principal);
+        Ok(())
     }
 }
 

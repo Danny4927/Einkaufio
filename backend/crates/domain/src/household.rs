@@ -143,6 +143,23 @@ impl Household {
         }
     }
 
+    /// Reconstitutes a household from persisted state (persistence adapters only).
+    ///
+    /// Performs no business transition and does not advance the version.
+    pub fn restore(
+        id: HouseholdId,
+        name: HouseholdName,
+        owner_id: UserId,
+        version: AggregateVersion,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            owner_id,
+            version,
+        }
+    }
+
     pub fn id(&self) -> &HouseholdId {
         &self.id
     }
@@ -313,5 +330,21 @@ mod tests {
             Err(HouseholdMutationError::VersionExhausted)
         );
         assert_eq!(household.name().as_str(), "Familie");
+    }
+
+    #[test]
+    fn restore_reconstitutes_owner_and_version() {
+        let restored = Household::restore(
+            HouseholdId::try_new("household-1").unwrap(),
+            HouseholdName::try_new("WG").unwrap(),
+            UserId::try_new("new-owner").unwrap(),
+            AggregateVersion::try_new(5).unwrap(),
+        );
+        assert_eq!(restored.version().as_u64(), 5);
+        assert_eq!(
+            restored.role_of_member(&UserId::try_new("new-owner").unwrap()),
+            HouseholdRole::Owner
+        );
+        assert_eq!(restored.name().as_str(), "WG");
     }
 }

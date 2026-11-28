@@ -33,6 +33,33 @@ jobs:
       - name: Dependency policy (licenses, advisories, bans, sources)
         run: make deny
 
+  backend-dynamodb:
+    name: backend / dynamodb-local-contracts
+    runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        # Pinned DynamoDB Local release; the image starts with -inMemory by default.
+        image: amazon/dynamodb-local:3.3.2
+        ports:
+          - 8000:8000
+    env:
+      DYNAMODB_ENDPOINT: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for DynamoDB Local
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null "$DYNAMODB_ENDPOINT"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "DynamoDB Local did not become reachable" >&2
+          exit 1
+      - name: DynamoDB adapter unit, contract and race tests (fails if no endpoint)
+        run: make test-dynamodb
+
   web:
     name: web / lint-unit-build-e2e-visual-capture
     runs-on: ubuntu-latest

@@ -54,6 +54,15 @@ impl UserProfile {
         }
     }
 
+    /// Reconstitutes a profile from persisted state (persistence adapters only).
+    pub fn restore(user_id: UserId, display_name: DisplayName, version: AggregateVersion) -> Self {
+        Self {
+            user_id,
+            display_name,
+            version,
+        }
+    }
+
     pub fn user_id(&self) -> &UserId {
         &self.user_id
     }
@@ -132,5 +141,16 @@ mod tests {
             Err(ListMutationError::VersionExhausted)
         );
         assert_eq!(profile, before);
+    }
+
+    #[test]
+    fn restore_reconstitutes_version() {
+        let restored = UserProfile::restore(
+            UserId::try_new("user-1").unwrap(),
+            DisplayName::try_new("Anna").unwrap(),
+            AggregateVersion::try_new(3).unwrap(),
+        );
+        assert_eq!(restored.version().as_u64(), 3);
+        assert_eq!(restored.display_name().as_str(), "Anna");
     }
 }

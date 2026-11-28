@@ -41,6 +41,8 @@ data "aws_iam_policy_document" "this" {
       "dynamodb:DeleteItem",
       "dynamodb:Query",
       "dynamodb:BatchGetItem",
+      # Bounded deletion sweeps (ADR 019).
+      "dynamodb:BatchWriteItem",
       "dynamodb:ConditionCheckItem",
     ]
     resources = [
